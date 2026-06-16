@@ -1,0 +1,274 @@
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Noto+Serif+SC:wght@400;500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&family=Ma+Shan+Zheng&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes busy-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+@layer base {
+  :root {
+    --bg: #f7f5f0;
+    --bg-elev: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #5e5b54;
+    --ink-mute: #8a857c;
+    --line: #e7e3da;
+    --line-soft: #f0ece4;
+    --accent: #1a1a1a;
+    --accent-soft: #2d2a26;
+    --rose: #c4564a;
+    --warm: #c9892f;
+    --sage: #6b7a5a;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Geist", "Noto Sans SC", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: var(--ink);
+    color: var(--bg);
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* 提交按钮内的脉冲点不要 outline */
+  button:focus-visible,
+  kbd:focus-visible {
+    outline-offset: 1px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  .font-display {
+    font-family: "Newsreader", "Noto Serif SC", "Songti SC", "STSong", serif;
+    font-weight: 500;
+    font-variation-settings: "opsz" 72;
+    letter-spacing: -0.025em;
+  }
+  .font-brush {
+    font-family: "Ma Shan Zheng", "Newsreader", "Noto Serif SC", serif;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+  }
+  .font-serif-italic {
+    font-family: "Newsreader", "Noto Serif SC", serif;
+    font-style: italic;
+    font-weight: 400;
+    font-variation-settings: "opsz" 14;
+  }
+  .font-mono {
+    font-family: "Geist Mono", "JetBrains Mono", monospace;
+    font-feature-settings: "ss02";
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(0, 0, 0, 0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.025) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .grain {
+    position: relative;
+  }
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E");
+    mix-blend-mode: multiply;
+  }
+  /* Hero 区顶部微弱径向高光 */
+  .hero-glow {
+    background:
+      radial-gradient(
+        ellipse 60% 50% at 50% -10%,
+        rgba(196, 86, 74, 0.07),
+        transparent 70%
+      ),
+      radial-gradient(
+        ellipse 40% 40% at 90% 0%,
+        rgba(201, 137, 47, 0.05),
+        transparent 70%
+      );
+  }
+  /* Stagger fade-up 序列 */
+  .stagger-fade > * {
+    opacity: 0;
+    animation: fadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .stagger-fade > *:nth-child(1) {
+    animation-delay: 0.05s;
+  }
+  .stagger-fade > *:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .stagger-fade > *:nth-child(3) {
+    animation-delay: 0.25s;
+  }
+  .stagger-fade > *:nth-child(4) {
+    animation-delay: 0.35s;
+  }
+  .stagger-fade > *:nth-child(5) {
+    animation-delay: 0.45s;
+  }
+  .stagger-fade > *:nth-child(6) {
+    animation-delay: 0.55s;
+  }
+  /* Marquee */
+  .marquee-mask {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 8%,
+      black 92%,
+      transparent
+    );
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 8%,
+      black 92%,
+      transparent
+    );
+  }
+  .marquee-track {
+    animation: marquee 50s linear infinite;
+  }
+  .marquee-track:hover {
+    animation-play-state: paused;
+  }
+  /* 主按钮 shine 扫光 */
+  .btn-shine {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-shine::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      100deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.18) 50%,
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+  .btn-shine:hover::after {
+    animation: shimmer 0.9s ease-out;
+  }
+  /* 文本下划线动效 */
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    background-size: 0 1px;
+    transition: background-size 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .link-underline:hover {
+    background-size: 100% 1px;
+  }
+}

@@ -1,0 +1,8 @@
+node_modules
+.next
+out
+.env*.local
+.DS_Store
+*.log
+# TypeScript incremental build cache（每次 tsc 都会重建，无需入仓）
+tsconfig.tsbuildinfo
