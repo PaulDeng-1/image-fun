@@ -1,11 +1,13 @@
 // 中转站 + 生图参数集中配置。
-// 注意：模型名按你中转站支持的填，默认按用户确认为 gpt-image-2-pro。
+// 端点和模型都从环境变量读，方便接任意兼容 OpenAI 图像接口的服务。
+// 部署时在 .env.local 必填：GPT_IMAGE_ENDPOINT / GPT_IMAGE_EDITS_ENDPOINT / GPT_IMAGE_MODEL。
 export const IMAGE_CONFIG = {
-  // 文生图
-  endpoint: "https://dk.claudecode.love/v1/images/generations",
-  // 图生图 / 多图合成
-  editsEndpoint: "https://dk.claudecode.love/v1/images/edits",
-  defaultModel: process.env.GPT_IMAGE_MODEL || "gpt-image-2-pro",
+  // 文生图（必填）
+  endpoint: process.env.GPT_IMAGE_ENDPOINT || "",
+  // 图生图 / 多图合成（必填）
+  editsEndpoint: process.env.GPT_IMAGE_EDITS_ENDPOINT || "",
+  // 模型名（按你的服务支持的填）
+  defaultModel: process.env.GPT_IMAGE_MODEL || "gpt-image-1",
   defaultSize: "1024x1024" as const,
   defaultQuality: "low" as const,
   defaultN: 1,

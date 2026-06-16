@@ -21,8 +21,8 @@ npm run dev
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `GPT_IMAGE_API_KEY` | 是 | 中转站 API key（`sk-...`） |
-| `GPT_IMAGE_MODEL` | 否 | 模型名，默认 `gpt-img-2-pro` |
+| `GPT_IMAGE_API_KEY` | 是 | 模型服务 API key（`sk-...`，具体服务自配） |
+| `GPT_IMAGE_MODEL` | 否 | 模型名（默认见 `src/lib/config.ts`） |
 
 > 注意：`.env.local` 已在 `.gitignore` 中，**不要提交到 Git**。
 
@@ -30,12 +30,15 @@ npm run dev
 
 - Next.js 14（App Router） + TypeScript
 - Tailwind CSS
-- 中转站：https://dk.claudecode.love/v1/images/generations
-- 模型：`gpt-image-2-pro`（可通过 `GPT_IMAGE_MODEL` 覆盖）
+- Supabase（Auth + Postgres + Storage）
+- Vercel（部署 + Cron）或任意 Node.js 环境
 
 ## 当前状态
 
 - ✅ 基础 prompt 输入 + 生成
 - ✅ 加载 / 错误 / 结果状态
-- ✅ 示例 prompt 一键填入
-- ⬜ 微信登录、点数、生成历史（按 docs/plans 走）
+- ✅ 文生图 + 图生图 + 多图合成
+- ✅ 登录/注册 + 个人中心 + 生成历史
+- ✅ 软删除 + 30 天清理
+- ✅ 缩略图优化（/me 加载快 100 倍）
+- ⬜ 支付宝充值 + 扣点逻辑（待 M3 凭证）

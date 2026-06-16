@@ -6,3 +6,5 @@ out
 *.log
 # TypeScript incremental build cache（每次 tsc 都会重建，无需入仓）
 tsconfig.tsbuildinfo
+# Claude / agent 自己的本地状态和备份，不该入仓
+.claude/
