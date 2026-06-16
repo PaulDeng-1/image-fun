@@ -5,6 +5,7 @@
 # ============================================================
 
 set -e
+set -o pipefail  # pipe 里任意命令失败就停
 # 用 /var/log 而不是 /tmp —— OrcaTerm Web 终端会把 /tmp 映射到用户 Windows 本机的 Temp，写入会失败
 LOG=/var/log/image-fun-deploy.log
 exec > >(tee -a "$LOG") 2>&1
@@ -114,16 +115,32 @@ fi
 # 8. 装依赖 + build + 启服务
 banner "[8/8] npm install + build + PM2 + Nginx"
 echo "（这一步 5-10 分钟）"
-npm install --registry=https://registry.npmmirror.com 2>&1 | tail -5
+
+# 内存预警：Ubuntu 22.04 默认有 2GB，build 期间峰值可能 1.8GB+
+AVAIL_MEM_MB=$(free -m | awk '/^Mem:/ {print $7}')
+echo "可用内存: ${AVAIL_MEM_MB}MB"
+if [ "$AVAIL_MEM_MB" -lt 600 ]; then
+  echo "⚠️ 内存严重不足（<600MB），建议先 swap 或升级配置"
+fi
+
+npm install --registry=https://registry.npmmirror.com 2>&1 | tail -8 || { echo "❌ npm install 失败"; exit 1; }
+
+# 验证 next 真的装上了（之前 deploy.sh 漏了 pipefail，install 失败 build 也继续）
+if [ ! -x node_modules/.bin/next ]; then
+  echo "❌ next 没装上，检查 npm install 输出（被 tail 截断）"
+  echo "手动跑: cd /opt/image-fun && npm install --registry=https://registry.npmmirror.com"
+  exit 1
+fi
 
 # sharp 在 Linux 上通常自带预编译 binary，不需要 gcc；如果失败会自己编译
 echo ""
-echo "Build（Next.js prod）..."
-NODE_OPTIONS="--max-old-space-size=1536" npm run build 2>&1 | tail -15
+echo "Build（Next.js prod，可能 3-5 分钟）..."
+NODE_OPTIONS="--max-old-space-size=1400" npm run build 2>&1 | tail -20 || { echo "❌ build 失败"; exit 1; }
 
-# PM2 启动（限制 Node 内存 1.5G，留 500MB 给系统）
+# PM2 启动：用绝对路径避免 PM2 fork mode 不继承 PATH
 pm2 delete image-fun 2>/dev/null || true
-NODE_OPTIONS="--max-old-space-size=1536" pm2 start npm --name image-fun -- start
+cd /opt/image-fun
+NODE_OPTIONS="--max-old-space-size=1400" pm2 start /opt/nodejs20/bin/npm --name image-fun -- start
 pm2 save
 pm2 startup systemd -u root --hp /root | tail -3 || true
 
