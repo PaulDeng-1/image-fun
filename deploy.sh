@@ -28,12 +28,28 @@ echo "✓ root OK"
 banner "[2/8] 装基础工具（git / nginx / firewalld）"
 dnf install -y git nginx firewalld curl 2>&1 | tail -3
 
-# 3. 装 Node.js 20（NodeSource 源，国内可达）
+# 3. 装 Node.js 20（OpenCloudOS 不被 NodeSource 识别，改用 tarball）
 banner "[3/8] 装 Node.js 20"
 if ! command -v node &>/dev/null || [ "$(node -v 2>/dev/null | cut -d. -f1 | tr -d 'v' || echo 0)" -lt 20 ]; then
-  echo "装 NodeSource 源 + Node.js 20..."
-  curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-  dnf install -y nodejs
+  echo "下载 Node.js 20 官方 tarball..."
+  cd /tmp
+  # 国内 mirror（npmmirror 同步了 nodejs.org 全部版本）；如不通自动 fallback 官方
+  if curl -fsSL --max-time 60 https://registry.npmmirror.com/-/binary/node/v20.19.0/node-v20.19.0-linux-x64.tar.gz -o node.tar.gz; then
+    echo "✓ 从 npmmirror 下载成功"
+  elif curl -fsSL --max-time 60 https://nodejs.org/dist/v20.19.0/node-v20.19.0-linux-x64.tar.gz -o node.tar.gz; then
+    echo "✓ 从 nodejs.org 下载成功"
+  else
+    echo "❌ Node.js 下载失败，请检查网络"
+    exit 1
+  fi
+  tar -xzf node.tar.gz -C /opt
+  mv /opt/node-v20.19.0-linux-x64 /opt/nodejs20
+  ln -sf /opt/nodejs20/bin/node /usr/local/bin/node
+  ln -sf /opt/nodejs20/bin/npm /usr/local/bin/npm
+  ln -sf /opt/nodejs20/bin/npx /usr/local/bin/npx
+  echo 'export PATH=/opt/nodejs20/bin:$PATH' > /etc/profile.d/nodejs.sh
+  chmod +x /etc/profile.d/nodejs.sh
+  rm node.tar.gz
 fi
 node -v
 npm -v
