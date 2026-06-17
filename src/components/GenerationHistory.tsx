@@ -12,8 +12,9 @@ type Generation = {
   size: string;
   quality: string;
   n: number;
-  image_urls: string[];
-  // 新字段（M5.x 优化）；老数据可能为 null —— fallback 到 image_urls
+  // image_urls 在生成中是 null（占位）；成功后 UPDATE 成真实 URL
+  // 这里要兼容 null，否则 next/image 渲染占位 URL 会 throw
+  image_urls: string[] | null;
   thumbnail_urls: string[] | null;
   created_at: string;
 };
@@ -30,6 +31,8 @@ export async function GenerationHistory() {
     .from("generations")
     .select("id, prompt, mode, size, quality, n, image_urls, thumbnail_urls, created_at")
     .eq("user_id", user.id)
+    // 只查已完成的（生成中 image_urls 为 null）
+    .not("image_urls", "is", null)
     .order("created_at", { ascending: false })
     .limit(48);
 
@@ -37,7 +40,10 @@ export async function GenerationHistory() {
     console.error("[history] query failed:", error);
   }
 
-  const items = (data ?? []) as Generation[];
+  const items = ((data ?? []) as Generation[]).filter(
+    // 防御：data 可能有 image_urls=null 但 not is null 没生效（旧数据残留）
+    (g) => Array.isArray(g.image_urls) && g.image_urls.length > 0
+  );
 
   if (items.length === 0) {
     return (
@@ -72,8 +78,8 @@ export async function GenerationHistory() {
       <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-3">
         {items.map((g, idx) => {
           // 优先缩略图，缺失时降级原图（兼容老数据）
-          const first = (g.thumbnail_urls && g.thumbnail_urls[0]) || g.image_urls[0];
-          const more = g.image_urls.length - 1;
+          const first = (g.thumbnail_urls && g.thumbnail_urls[0]) || g.image_urls![0];
+          const more = g.image_urls!.length - 1;
           // 前 4 张加 priority：让浏览器先加载视口内的（LCP 友好）
           const priority = idx < 4;
           return (
@@ -84,7 +90,7 @@ export async function GenerationHistory() {
               <div className="relative aspect-square w-full">
                 {first && (
                   <a
-                    href={g.image_urls[0]}
+                    href={g.image_urls![0]}
                     target="_blank"
                     rel="noreferrer"
                     aria-label={`查看「${g.prompt}」`}
@@ -102,7 +108,7 @@ export async function GenerationHistory() {
                     />
                   </a>
                 )}
-                {first && <GenerationActions id={g.id} downloadUrl={g.image_urls[0]} />}
+                {first && <GenerationActions id={g.id} downloadUrl={g.image_urls![0]} />}
                 {more > 0 && (
                   <span className="absolute bottom-1.5 right-1.5 z-10 rounded-md bg-ink/70 px-1.5 py-0.5 font-mono text-[10px] tabular text-paper backdrop-blur-sm">
                     +{more}

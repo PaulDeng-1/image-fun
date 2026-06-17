@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { ResultCard, type GenerationResult } from "@/components/ResultCard";
 import { ModeToggle } from "@/components/ModeToggle";
 import { ImageUploader } from "@/components/ImageUploader";
 import { Controls } from "@/components/Controls";
 import { LoginPrompt } from "@/components/LoginPrompt";
+import { showToast } from "@/components/Toast";
+import { setBusy } from "@/components/BusyIndicator";
 import {
   IMAGE_CONFIG,
   type ImageMode,
@@ -54,6 +57,7 @@ export function PromptForm({
   const [authed, setAuthed] = useState<boolean | null>(null); // null = 加载中, true/false = 已确认
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const resultRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
 
   const isLoading = status.kind === "loading";
   const result = status.kind === "ok" ? status.result : null;
@@ -108,6 +112,7 @@ export function PromptForm({
     }
     setPrompt(p);
     setStatus({ kind: "loading" });
+    setBusy(true, "正在生成…");
 
     try {
       let res: Response;
@@ -142,6 +147,18 @@ export function PromptForm({
       }
 
       const data = await res.json().catch(() => ({}));
+
+      // 余额不足（M6）：弹 toast + 跳 /redeem
+      if (res.status === 402 || data?.code === "insufficient_credits") {
+        const msg = "余额不足，请前往充值";
+        setStatus({ kind: "error", message: msg });
+        showToast(msg, "danger");
+        triggerShake();
+        // 延迟跳转让用户看到 toast
+        window.setTimeout(() => router.push("/redeem"), 600);
+        return;
+      }
+
       if (!res.ok || !Array.isArray(data?.imageUrls) || data.imageUrls.length === 0) {
         const main = data?.error || `生成失败（${res.status}）`;
         const hint = data?.upstream?.hint ? `（${data.upstream.hint}）` : "";
@@ -161,6 +178,10 @@ export function PromptForm({
           createdAt: Date.now(),
         },
       });
+      // 让 /me 之类的服务端组件在下次导航时拿到新数据
+      // （revalidatePath 在服务端清了服务端 cache，但客户端 Router Cache
+      //  默认 30s 还在；refresh 强制下次 render 重拉 RSC）
+      router.refresh();
       window.setTimeout(() => {
         resultRef.current?.scrollIntoView({
           behavior: "smooth",
@@ -173,6 +194,8 @@ export function PromptForm({
         message: err instanceof Error ? err.message : "网络错误",
       });
       triggerShake();
+    } finally {
+      setBusy(false);
     }
   };
 
