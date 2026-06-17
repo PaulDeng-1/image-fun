@@ -1,3 +1,19 @@
+// /api/generate — 文生图 / 图生图
+// M6：credits 扣费 + 全路径退款保障
+//
+// 事务编排（关键：consume 必须拿到 ref_id）：
+//   1) 校验请求 + 登录
+//   2) INSERT 一行空的 generations（拿 id 作为 ledger.ref_id）
+//   3) credit_consume(cost, gen_id) —— 原子扣费
+//      - 失败（402 / 余额不足）：DELETE gen 行，返回错误
+//   4) 调上游 —— 失败：refund + DELETE gen 行
+//   5) 持久化图片到 Storage —— 失败：refund + DELETE gen 行 + 删 storage
+//   6) UPDATE gen 行 image_urls / thumbnail_urls
+//   7) revalidatePath('/me')
+//   8) 返回成功
+//
+// 客户端断开（req.signal.aborted）→ 透传到 controller.abort()，
+// 上游 fetch 会中止，避免白扣。
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import sharp from "sharp";
@@ -112,8 +128,24 @@ async function parseRequest(req: NextRequest): Promise<ParseResult> {
   return { ok: true, mode, prompt, size, quality, n, images };
 }
 
+// 删 storage 对象（失败仅 log，不阻塞）
+async function cleanupStorage(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  try {
+    const supabase = createClient();
+    const { error } = await supabase.storage
+      .from("generations")
+      .remove(paths);
+    if (error) {
+      console.warn("[generate] storage cleanup partial fail:", error);
+    }
+  } catch (e) {
+    console.warn("[generate] storage cleanup exception:", e);
+  }
+}
+
 export async function POST(req: NextRequest) {
-  // M2 强制登录（M4 接入扣点逻辑时再加余额检查）
+  // M2 强制登录
   const supabase = createClient();
   const {
     data: { user },
@@ -139,10 +171,107 @@ export async function POST(req: NextRequest) {
   }
 
   const { mode, prompt, size, quality, n, images } = parsed;
+  const cost = n; // 1 张 = 1 点（1 点 = ¥0.7）
   const upstreamUrl =
     mode === "i2i" ? IMAGE_CONFIG.editsEndpoint : IMAGE_CONFIG.endpoint;
 
-  // 构造上游请求体
+  // ============================================================
+  // 步骤 1：先 INSERT 空行，拿 gen_id 作为 ledger ref_id
+  // （credits RPC 要求 ref_id 必须是真实 generation id）
+  // ============================================================
+  const { data: genRow, error: preInsertErr } = await supabase
+    .from("generations")
+    .insert({
+      user_id: user.id,
+      prompt,
+      mode,
+      size,
+      quality,
+      n,
+      // 生成中 image_urls 为 null；成功后 UPDATE 成真实 URL
+      // 用 null 而不是占位字符串，避免被 next/image 当成合法 src 渲染报错
+      image_urls: null,
+    })
+    .select("id")
+    .single();
+
+  if (preInsertErr || !genRow) {
+    console.error("[generate] pre-insert generations failed:", preInsertErr);
+    return NextResponse.json(
+      { error: "历史记录创建失败，请稍后再试" },
+      { status: 500 }
+    );
+  }
+  const genId = genRow.id;
+
+  // ============================================================
+  // 步骤 2：扣费。consume 成功 → 进入下游；失败 → DELETE gen 行 + 返错
+  // ============================================================
+  const { data: consumed, error: consumeErr } = await supabase.rpc(
+    "credit_consume",
+    { p_amount: cost, p_ref_id: genId }
+  );
+
+  if (consumeErr) {
+    console.error("[generate] credit_consume rpc error:", consumeErr);
+    await supabase.from("generations").delete().eq("id", genId);
+    return NextResponse.json(
+      { error: "余额服务异常，请稍后再试" },
+      { status: 500 }
+    );
+  }
+  if (consumed !== true) {
+    // 余额不足 / ref_id 校验失败
+    await supabase.from("generations").delete().eq("id", genId);
+    return NextResponse.json(
+      {
+        error: "余额不足，请前往充值",
+        code: "insufficient_credits",
+        required: cost,
+      },
+      { status: 402 }
+    );
+  }
+
+  // ============================================================
+  // 步骤 3：refund + cleanup 工具
+  // 任何 return 路径在 consume 之后都必须 refund（成功后不调）
+  // ============================================================
+  let refunded = false;
+  let generationDeleted = false;
+  const uploadedPaths: string[] = [];
+
+  const cleanup = async () => {
+    // 1) refund（用真实 gen_id，幂等）
+    if (!refunded) {
+      refunded = true;
+      const { error } = await supabase.rpc("credit_refund", {
+        p_amount: cost,
+        p_ref_id: genId,
+      });
+      if (error) {
+        console.error(
+          `[generate] CRITICAL: credit_refund failed (user=${user.id}, gen=${genId}, cost=${cost}):`,
+          error
+        );
+      } else {
+        console.log(
+          `[generate] refunded ${cost} credits (gen=${genId}, user=${user.id})`
+        );
+      }
+    }
+    // 2) DELETE gen 行
+    if (!generationDeleted) {
+      generationDeleted = true;
+      await supabase.from("generations").delete().eq("id", genId);
+    }
+    // 3) best-effort 清 storage
+    await cleanupStorage(uploadedPaths);
+  };
+
+  // ============================================================
+  // 步骤 4：构造上游请求
+  // ============================================================
   let upstreamBody: BodyInit;
   const upstreamHeaders: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
@@ -175,9 +304,17 @@ export async function POST(req: NextRequest) {
 
   const controller = new AbortController();
   const timer = setTimeout(
-    () => controller.abort(),
+    () => controller.abort(new Error("upstream timeout")),
     IMAGE_CONFIG.upstreamTimeoutMs
   );
+
+  // 客户端断开 → 也 abort（防白扣）
+  // 注意：req.signal 是 NextRequest 暴露的；disconnect 后会触发 abort
+  req.signal.addEventListener("abort", () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error("client disconnected"));
+    }
+  });
 
   // 单次上游调用；外层做重试。
   // 重要：body 只读一次，存到 `detail` 里。后续成功路径用 JSON.parse(detail)，
@@ -238,6 +375,14 @@ export async function POST(req: NextRequest) {
       break;
     } catch (err) {
       lastErr = err;
+      // 客户端断开：立即退出，不再重试
+      if (
+        err instanceof Error &&
+        (err.name === "AbortError" ||
+          /client disconnected/i.test(err.message))
+      ) {
+        break;
+      }
       if (attempt < 2) {
         await new Promise((res) =>
           setTimeout(res, 800 * (attempt + 1) * (attempt + 1))
@@ -249,17 +394,24 @@ export async function POST(req: NextRequest) {
   }
 
   if (!upstream) {
-    // 三次都抛了网络错误
+    // 三次都抛了网络错误 / 客户端断开
     console.error("[generate] network error (retried):", lastErr);
     clearTimeout(timer);
+    await cleanup();
+    if (lastErr instanceof Error && /client disconnected/i.test(lastErr.message)) {
+      return NextResponse.json(
+        { error: "客户端断开，已自动退款" },
+        { status: 499 } // nginx 风格：client closed request
+      );
+    }
     if (lastErr instanceof Error && lastErr.name === "AbortError") {
       return NextResponse.json(
-        { error: "生成超时，请重试" },
+        { error: "生成超时，已自动退款" },
         { status: 504 }
       );
     }
     return NextResponse.json(
-      { error: "网络错误，请稍后再试" },
+      { error: "网络错误，已自动退款" },
       { status: 502 }
     );
   }
@@ -294,17 +446,18 @@ export async function POST(req: NextRequest) {
     const userMessage = isContentPolicy
       ? "提示词包含不被允许的内容，请调整后重试"
       : cfChallenge
-        ? "上游服务触发了人机验证，已自动重试 3 次仍失败，请稍后再试"
+        ? "上游服务触发了人机验证，已自动重试 3 次仍失败，已自动退款"
         : upstream.status === 400
-          ? "提示词或参数被上游拒绝"
+          ? "提示词或参数被上游拒绝，已自动退款"
           : upstream.status === 401
-            ? "API key 无效或已过期"
+            ? "API key 无效或已过期，已自动退款"
             : upstream.status === 403
-              ? "API key 没有访问权限"
+              ? "API key 没有访问权限，已自动退款"
               : upstream.status === 429
-                ? "调用太频繁，稍后再试"
-                : "生成服务异常，请稍后再试";
+                ? "调用太频繁，已自动退款，稍后再试"
+                : "生成服务异常，已自动退款";
     clearTimeout(timer);
+    await cleanup();
     return NextResponse.json(
       {
         error: userMessage,
@@ -324,192 +477,203 @@ export async function POST(req: NextRequest) {
     );
   }
 
-    // 上游响应可能是多种形态：
-    //   { data: [{ url|b64_json|image_url }] }   OpenAI 官方
-    //   { data: [{ image: "..." }] }              部分中转
-    //   { images: [{ url }] }                     部分中转
-    //   { url: "..." } / { b64_json: "..." }      单图直返
-    // 兼容所有，b64 直接转 data URL 让前端能展示
-    type ImgItem = { kind: "url"; value: string } | { kind: "b64"; value: string };
+  // 上游响应可能是多种形态：
+  //   { data: [{ url|b64_json|image_url }] }   OpenAI 官方
+  //   { data: [{ image: "..." }] }              部分中转
+  //   { images: [{ url }] }                     部分中转
+  //   { url: "..." } / { b64_json: "..." }      单图直返
+  // 兼容所有，b64 直接转 data URL 让前端能展示
+  type ImgItem = { kind: "url"; value: string } | { kind: "b64"; value: string };
 
-    // body 已经在 callUpstream 里读过一遍并 JSON.parse 进 `raw`，
-    // 这里直接用，不要再 upstream.json() 读第二次（会被读空成 null）。
-    const items: ImgItem[] = [];
-    const pushItem = (d: any) => {
-      if (!d || typeof d !== "object") return;
-      if (typeof d.url === "string" && d.url) {
-        items.push({ kind: "url", value: d.url });
-      } else if (typeof d.image_url === "string" && d.image_url) {
-        items.push({ kind: "url", value: d.image_url });
-      } else if (typeof d.image === "string" && d.image) {
-        items.push({ kind: "url", value: d.image });
-      } else if (typeof d.b64_json === "string" && d.b64_json) {
-        items.push({ kind: "b64", value: d.b64_json });
-      } else if (typeof d.b64 === "string" && d.b64) {
-        items.push({ kind: "b64", value: d.b64 });
-      }
-    };
-
-    if (raw && typeof raw === "object") {
-      if (Array.isArray(raw.data)) raw.data.forEach(pushItem);
-      else if (raw.data && typeof raw.data === "object") pushItem(raw.data);
-
-      if (Array.isArray(raw.images)) raw.images.forEach(pushItem);
-      else if (raw.images && typeof raw.images === "object") pushItem(raw.images);
-
-      // 顶层单图
-      if (items.length === 0) pushItem(raw);
+  // body 已经在 callUpstream 里读过一遍并 JSON.parse 进 `raw`，
+  // 这里直接用，不要再 upstream.json() 读第二次（会被读空成 null）。
+  const items: ImgItem[] = [];
+  const pushItem = (d: any) => {
+    if (!d || typeof d !== "object") return;
+    if (typeof d.url === "string" && d.url) {
+      items.push({ kind: "url", value: d.url });
+    } else if (typeof d.image_url === "string" && d.image_url) {
+      items.push({ kind: "url", value: d.image_url });
+    } else if (typeof d.image === "string" && d.image) {
+      items.push({ kind: "url", value: d.image });
+    } else if (typeof d.b64_json === "string" && d.b64_json) {
+      items.push({ kind: "b64", value: d.b64_json });
+    } else if (typeof d.b64 === "string" && d.b64) {
+      items.push({ kind: "b64", value: d.b64 });
     }
+  };
 
-    if (items.length === 0) {
-      // 完整 dump 到日志，方便排查代理返回了什么鬼
-      console.error(
-        "[generate] no images in response. status=%s, contentType=%s, body:",
-        upstream.status,
-        upstream.headers.get("content-type"),
-        JSON.stringify(raw).slice(0, 2000)
-      );
-      clearTimeout(timer);
-      return NextResponse.json(
-        {
-          error: "生成服务未返回图片地址（已记录响应，联系客服可排查）",
-          ...(process.env.NODE_ENV !== "production" && {
-            upstreamShape: raw ? Object.keys(raw as object) : null,
-          }),
-        },
-        { status: 502 }
-      );
-    }
+  if (raw && typeof raw === "object") {
+    if (Array.isArray(raw.data)) raw.data.forEach(pushItem);
+    else if (raw.data && typeof raw.data === "object") pushItem(raw.data);
 
-    // 给前端的 imageUrls：url 原样返，b64 包成 data URL
-    const clientImageUrls = items.map((it) =>
-      it.kind === "url" ? it.value : `data:image/png;base64,${it.value}`
+    if (Array.isArray(raw.images)) raw.images.forEach(pushItem);
+    else if (raw.images && typeof raw.images === "object") pushItem(raw.images);
+
+    // 顶层单图
+    if (items.length === 0) pushItem(raw);
+  }
+
+  if (items.length === 0) {
+    // 完整 dump 到日志，方便排查代理返回了什么鬼
+    console.error(
+      "[generate] no images in response. status=%s, contentType=%s, body:",
+      upstream.status,
+      upstream.headers.get("content-type"),
+      JSON.stringify(raw).slice(0, 2000)
     );
+    clearTimeout(timer);
+    await cleanup();
+    return NextResponse.json(
+      {
+        error: "生成服务未返回图片地址，已自动退款",
+        ...(process.env.NODE_ENV !== "production" && {
+          upstreamShape: raw ? Object.keys(raw as object) : null,
+        }),
+      },
+      { status: 502 }
+    );
+  }
 
-    // M5 持久化：url 走 fetch 下载，b64 直接转 Blob
-    // M5.x：每张原图旁生成 256×256 WebP 缩略图，写入 thumbnail_urls。
-    // /me 直接渲染缩略图（~10-30KB），按需点开才拉原图（~1-3MB）。
-    let persistentUrls: string[] = [];
-    let thumbnailUrls: string[] = [];
-    try {
-      const results = await Promise.all(
-        items.map(async (item, idx) => {
-          // 1) 解码原图（url 走 fetch，b64 直接转 Blob）
-          let blob: Blob;
-          let mime = "image/png";
-          if (item.kind === "url") {
-            const imgRes = await fetch(item.value);
-            if (!imgRes.ok) throw new Error(`download ${imgRes.status}`);
-            blob = await imgRes.blob();
-            mime = blob.type || "image/png";
-          } else {
-            const buf = Buffer.from(item.value, "base64");
-            blob = new Blob([buf], { type: mime });
+  // 给前端的 imageUrls：url 原样返，b64 包成 data URL
+  const clientImageUrls = items.map((it) =>
+    it.kind === "url" ? it.value : `data:image/png;base64,${it.value}`
+  );
+
+  // ============================================================
+  // 步骤 5：持久化原图 + 缩略图 → UPDATE gen 行 image_urls
+  // ============================================================
+  let persistentUrls: string[] = [];
+  let thumbnailUrls: string[] = [];
+  try {
+    const results = await Promise.all(
+      items.map(async (item, idx) => {
+        // 1) 解码原图（url 走 fetch，b64 直接转 Blob）
+        let blob: Blob;
+        let mime = "image/png";
+        if (item.kind === "url") {
+          const imgRes = await fetch(item.value);
+          if (!imgRes.ok) throw new Error(`download ${imgRes.status}`);
+          blob = await imgRes.blob();
+          mime = blob.type || "image/png";
+        } else {
+          const buf = Buffer.from(item.value, "base64");
+          blob = new Blob([buf], { type: mime });
+        }
+
+        // 2) 生成缩略图。太大（>25MB）跳过 sharp：防卡 + 防 OOM。
+        // 失败不阻塞原图——前端会 fallback 到 image_urls。
+        let thumbBuffer: Buffer | null = null;
+        if (blob.size <= IMAGE_CONFIG.maxSourceBytes) {
+          try {
+            const ab = await blob.arrayBuffer();
+            thumbBuffer = await sharp(Buffer.from(ab))
+              .resize(
+                IMAGE_CONFIG.thumbnail.width,
+                IMAGE_CONFIG.thumbnail.height,
+                { fit: "cover", position: "center" }
+              )
+              .webp({ quality: IMAGE_CONFIG.thumbnail.quality })
+              .toBuffer();
+          } catch (e) {
+            console.error(`[generate] thumb gen failed (idx=${idx}):`, e);
           }
+        } else {
+          console.warn(
+            `[generate] source ${blob.size}B > ${IMAGE_CONFIG.maxSourceBytes}B, skip thumbnail`
+          );
+        }
 
-          // 2) 生成缩略图。太大（>25MB）跳过 sharp：防卡 + 防 OOM。
-          // 失败不阻塞原图——前端会 fallback 到 image_urls。
-          let thumbBuffer: Buffer | null = null;
-          if (blob.size <= IMAGE_CONFIG.maxSourceBytes) {
-            try {
-              const ab = await blob.arrayBuffer();
-              thumbBuffer = await sharp(Buffer.from(ab))
-                .resize(
-                  IMAGE_CONFIG.thumbnail.width,
-                  IMAGE_CONFIG.thumbnail.height,
-                  { fit: "cover", position: "center" }
-                )
-                .webp({ quality: IMAGE_CONFIG.thumbnail.quality })
-                .toBuffer();
-            } catch (e) {
-              console.error(`[generate] thumb gen failed (idx=${idx}):`, e);
-            }
-          } else {
-            console.warn(
-              `[generate] source ${blob.size}B > ${IMAGE_CONFIG.maxSourceBytes}B, skip thumbnail`
-            );
-          }
+        // 3) 上传原图（同步路径，失败抛错让整个持久化 fail）
+        const ts = Date.now();
+        const ext = mime.split("/")[1]?.split(";")[0] || "png";
+        const fullPath = `${user.id}/${ts}-${idx}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("generations")
+          .upload(fullPath, blob, {
+            contentType: mime,
+            cacheControl: "31536000",
+            upsert: false,
+          });
+        if (upErr) throw upErr;
+        // 记录 path 用于失败时清理
+        uploadedPaths.push(fullPath);
 
-          // 3) 上传原图（同步路径，失败抛错让整个持久化 fail）
-          const ts = Date.now();
-          const ext = mime.split("/")[1]?.split(";")[0] || "png";
-          const fullPath = `${user.id}/${ts}-${idx}.${ext}`;
-          const { error: upErr } = await supabase.storage
+        const { data: pub } = supabase.storage
+          .from("generations")
+          .getPublicUrl(fullPath);
+        const fullUrl = pub.publicUrl;
+
+        // 4) 上传缩略图（独立 try：失败仅缺缩略图，不影响原图）
+        let thumbUrl: string | null = null;
+        if (thumbBuffer) {
+          const thumbPath = `${user.id}/${ts}-${idx}.${IMAGE_CONFIG.thumbnail.format}`;
+          const { error: tErr, data: tPub } = await supabase.storage
             .from("generations")
-            .upload(fullPath, blob, {
-              contentType: mime,
+            .upload(thumbPath, thumbBuffer, {
+              contentType: "image/webp",
               cacheControl: "31536000",
               upsert: false,
             });
-          if (upErr) throw upErr;
-          const { data: pub } = supabase.storage
-            .from("generations")
-            .getPublicUrl(fullPath);
-          const fullUrl = pub.publicUrl;
-
-          // 4) 上传缩略图（独立 try：失败仅缺缩略图，不影响原图）
-          let thumbUrl: string | null = null;
-          if (thumbBuffer) {
-            const thumbPath = `${user.id}/${ts}-${idx}.${IMAGE_CONFIG.thumbnail.format}`;
-            const { error: tErr, data: tPub } = await supabase.storage
+          if (!tErr && tPub) {
+            const { data: pubT } = supabase.storage
               .from("generations")
-              .upload(thumbPath, thumbBuffer, {
-                contentType: "image/webp",
-                cacheControl: "31536000",
-                upsert: false,
-              });
-            if (!tErr && tPub) {
-              const { data: pubT } = supabase.storage
-                .from("generations")
-                .getPublicUrl(thumbPath);
-              thumbUrl = pubT.publicUrl;
-            } else if (tErr) {
-              console.error(`[generate] thumb upload failed (idx=${idx}):`, tErr);
-            }
+              .getPublicUrl(thumbPath);
+            thumbUrl = pubT.publicUrl;
+            uploadedPaths.push(thumbPath);
+          } else if (tErr) {
+            console.error(`[generate] thumb upload failed (idx=${idx}):`, tErr);
           }
+        }
 
-          return { fullUrl, thumbUrl };
-        })
-      );
+        return { fullUrl, thumbUrl };
+      })
+    );
 
-      persistentUrls = results.map((r) => r.fullUrl);
-      thumbnailUrls = results
-        .map((r) => r.thumbUrl)
-        .filter((u): u is string => !!u);
+    persistentUrls = results.map((r) => r.fullUrl);
+    thumbnailUrls = results
+      .map((r) => r.thumbUrl)
+      .filter((u): u is string => !!u);
 
-      const { error: insertErr } = await supabase
-        .from("generations")
-        .insert({
-          user_id: user.id,
-          prompt,
-          mode,
-          size,
-          quality,
-          n,
-          image_urls: persistentUrls,
-          // 全成功才写，否则 null → /me fallback 到 image_urls
-          thumbnail_urls: thumbnailUrls.length === persistentUrls.length ? thumbnailUrls : null,
-        });
-      if (insertErr) {
-        console.error("[generate] history insert failed:", insertErr);
-      } else {
-        // 让 /me 的 Router Cache 失效 —— 用户生成完点"个人中心"能立刻看到新记录
-        // 不清的话会看到上一次的 RSC payload，要手动刷新
-        revalidatePath("/me");
-      }
-    } catch (persistErr) {
-      console.error("[generate] persistence failed:", persistErr);
-      persistentUrls = [];
-      thumbnailUrls = [];
+    // UPDATE gen 行：把占位 URL 换成真实 URL
+    // 如果 UPDATE 失败 → refund + cleanup
+    const { error: updateErr } = await supabase
+      .from("generations")
+      .update({
+        image_urls: persistentUrls,
+        thumbnail_urls:
+          thumbnailUrls.length === persistentUrls.length ? thumbnailUrls : null,
+      })
+      .eq("id", genId);
+
+    if (updateErr) {
+      throw new Error(`generations update failed: ${updateErr.message}`);
     }
 
+    // 让 /me 的 Router Cache 失效 —— 用户生成完点"个人中心"能立刻看到新记录
+    // 不清的话会看到上一次的 RSC payload，要手动刷新
+    revalidatePath("/me");
+  } catch (persistErr) {
+    console.error("[generate] persistence failed:", persistErr);
     clearTimeout(timer);
-    return NextResponse.json({
-      imageUrls: persistentUrls.length > 0 ? persistentUrls : clientImageUrls,
-      prompt,
-      mode,
-      size,
-      quality,
-      n,
-    });
+    await cleanup();
+    return NextResponse.json(
+      {
+        error: "图片保存失败，已自动退款",
+        clientFallbackUrls: clientImageUrls,
+      },
+      { status: 502 }
+    );
+  }
+
+  clearTimeout(timer);
+  // 成功路径：不调 cleanup，credits 保留扣除，gen 行保留
+  return NextResponse.json({
+    imageUrls: persistentUrls.length > 0 ? persistentUrls : clientImageUrls,
+    prompt,
+    mode,
+    size,
+    quality,
+    n,
+  });
 }

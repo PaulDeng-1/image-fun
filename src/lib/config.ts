@@ -1,11 +1,28 @@
 // 中转站 + 生图参数集中配置。
 // 端点和模型都从环境变量读，方便接任意兼容 OpenAI 图像接口的服务。
 // 部署时在 .env.local 必填：GPT_IMAGE_ENDPOINT / GPT_IMAGE_EDITS_ENDPOINT / GPT_IMAGE_MODEL。
+//
+// 防御：启动时校验必填 env，缺失立即抛错（而不是默默兜底成空字符串）。
+// 缺失时空字符串会让 fetch 报 "Invalid URL"，排错很费劲。
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v || !v.trim()) {
+    throw new Error(
+      `[config] 缺少必填环境变量 ${name}（在 .env.local 里填一下）`
+    );
+  }
+  return v.trim();
+}
+
 export const IMAGE_CONFIG = {
-  // 文生图（必填）
-  endpoint: process.env.GPT_IMAGE_ENDPOINT || "",
+  // 文生图（必填，缺失启动时报错）
+  get endpoint() {
+    return requireEnv("GPT_IMAGE_ENDPOINT");
+  },
   // 图生图 / 多图合成（必填）
-  editsEndpoint: process.env.GPT_IMAGE_EDITS_ENDPOINT || "",
+  get editsEndpoint() {
+    return requireEnv("GPT_IMAGE_EDITS_ENDPOINT");
+  },
   // 模型名（按你的服务支持的填）
   defaultModel: process.env.GPT_IMAGE_MODEL || "gpt-image-1",
   defaultSize: "1024x1024" as const,

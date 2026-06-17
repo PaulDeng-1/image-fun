@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { UserMenu } from "@/components/UserMenu";
+import { isAdmin } from "@/lib/auth";
 
 export async function Navbar() {
   const user = await getCurrentUser();
+  const admin = isAdmin(user?.id);
 
   return (
     <header className="sticky top-0 z-20 border-b border-line/70 bg-paper/80 backdrop-blur-md">
@@ -41,7 +43,7 @@ export async function Navbar() {
         </Link>
         <nav className="flex items-center gap-3 md:gap-5">
           {user ? (
-            <UserMenu email={user.email ?? ""} />
+            <UserMenu email={user.email ?? ""} isAdmin={admin} />
           ) : (
             <>
               <Link
