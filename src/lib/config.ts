@@ -53,6 +53,13 @@ export const IMAGE_CONFIG = {
   },
   // 原图大小上限（防止有人上传 4K 巨型图卡住 sharp）
   maxSourceBytes: 25 * 1024 * 1024,
+  // 单张扣费（单位：元）
+  // low=0.5 元/张，medium=0.7，high=0.9；多张 = 单价 × n
+  costPerImageByQuality: {
+    low: 0.5,
+    medium: 0.7,
+    high: 0.9,
+  },
 } as const;
 
 export type ImageMime = (typeof IMAGE_CONFIG.allowedImageMimes)[number];
@@ -60,3 +67,8 @@ export type ImageMime = (typeof IMAGE_CONFIG.allowedImageMimes)[number];
 export type ImageSize = (typeof IMAGE_CONFIG.allowedSizes)[number];
 export type ImageQuality = (typeof IMAGE_CONFIG.allowedQualities)[number];
 export type ImageMode = "t2i" | "i2i";
+
+// 单次扣费 = 单价 × 张数（单位：元）
+export function computeCost(quality: ImageQuality, n: number): number {
+  return IMAGE_CONFIG.costPerImageByQuality[quality] * n;
+}

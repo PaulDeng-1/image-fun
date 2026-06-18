@@ -82,7 +82,7 @@ export function GenerateCodesForm() {
         <h2 className="mt-2 font-display text-xl text-ink">生成兑换码</h2>
 
         <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <Field label="面值（点）" required>
+          <Field label="面值（元）" required>
             <input
               type="number"
               min={1}
@@ -123,7 +123,7 @@ export function GenerateCodesForm() {
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="如：闲鱼小包 100 点"
+              placeholder="如：闲鱼小包 100 元"
               maxLength={200}
               disabled={pending}
               className={inputCls}
@@ -152,8 +152,8 @@ export function GenerateCodesForm() {
                 刚生成的 {generated.length} 个码
               </h2>
               <p className="mt-1 text-[12px] text-ink-soft">
-                共 {generated[0].amount} × {generated.length} ={" "}
-                {generated[0].amount * generated.length} 点
+                共 ¥{generated[0].amount} × {generated.length} ={" "}
+                ¥{(generated[0].amount * generated.length).toFixed(2)}
                 {generated[0].note ? ` · ${generated[0].note}` : ""}
               </p>
             </div>
@@ -165,7 +165,7 @@ export function GenerateCodesForm() {
               <CopyIcon /> 一键复制全部
             </button>
           </div>
-          <ul className="mt-5 grid max-h-96 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+          <ul className="mt-5 grid max-h-96 grid-cols-1 gap-2 overflow-y-auto [content-visibility:auto] sm:grid-cols-2">
             {generated.map((c) => (
               <li
                 key={c.code}

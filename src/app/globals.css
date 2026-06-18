@@ -155,7 +155,7 @@
     font-variation-settings: "opsz" 14;
   }
   .font-mono {
-    font-family: "Geist Mono", "JetBrains Mono", monospace;
+    font-family: "Geist Mono", "JetBrains Mono", "Noto Sans SC", monospace;
     font-feature-settings: "ss02";
   }
   .tabular {
@@ -270,5 +270,169 @@
   }
   .link-underline:hover {
     background-size: 100% 1px;
+  }
+
+  /* ============== 登录/注册页：高级感 ============== */
+
+  /* 卡片底纹：极淡的纸纹理叠加（2% 噪点）+ 顶部一道高光 */
+  .auth-card {
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, transparent 30%),
+      var(--bg-elev);
+  }
+  .auth-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E");
+    opacity: 0.025;
+    pointer-events: none;
+    mix-blend-mode: multiply;
+  }
+  /* 卡片金色细描边：用项目 sage 暗调，外加 inset 双层 */
+  .auth-card-border {
+    box-shadow:
+      inset 0 0 0 1px rgba(107, 122, 90, 0.18),
+      0 1px 0 rgba(255, 255, 255, 0.6) inset,
+      0 24px 48px -16px rgba(26, 26, 26, 0.08);
+  }
+
+  /* 单边下划线输入框（爱马仕/Loewe 风格） */
+  .input-line {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid rgba(26, 26, 26, 0.18);
+    padding: 14px 2px 12px;
+    font-size: 15px;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+    transition: border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    outline: none;
+    border-radius: 0;
+  }
+  .input-line::placeholder {
+    color: rgba(138, 133, 124, 0.55);
+    font-style: italic;
+    font-family: "Newsreader", "Noto Serif SC", serif;
+    font-size: 14px;
+  }
+  .input-line:hover {
+    border-bottom-color: rgba(26, 26, 26, 0.32);
+  }
+  .input-line:focus {
+    border-bottom-color: var(--ink);
+  }
+  .input-line:disabled {
+    opacity: 0.4;
+  }
+
+  /* 印章样式：圆形 + 双环 + 衬线字（做 logo 旁的小装饰） */
+  .seal-stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1.5px solid rgba(196, 86, 74, 0.55);
+    color: rgba(196, 86, 74, 0.7);
+    font-family: "Noto Serif SC", serif;
+    font-weight: 600;
+    font-size: 13px;
+    line-height: 1;
+    transform: rotate(-6deg);
+    box-shadow: inset 0 0 0 2px transparent, inset 0 0 0 3px rgba(196, 86, 74, 0.18);
+  }
+
+  /* 大号毛笔字印章（登录/注册页主标题） */
+  .seal-title {
+    font-family: "Ma Shan Zheng", "Noto Serif SC", serif;
+    font-size: 56px;
+    line-height: 1;
+    color: var(--ink);
+    letter-spacing: 0.08em;
+    position: relative;
+    display: inline-block;
+  }
+  @media (min-width: 768px) {
+    .seal-title {
+      font-size: 72px;
+    }
+  }
+  .seal-title::after {
+    content: "";
+    position: absolute;
+    left: -8px;
+    right: -8px;
+    bottom: 6px;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(196, 86, 74, 0.4) 30%,
+      rgba(196, 86, 74, 0.4) 70%,
+      transparent
+    );
+  }
+
+  /* 英文小标（KICKER）：衬线 italic + 大字距 */
+  .kicker {
+    font-family: "Newsreader", serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+
+  /* 高端感按钮：清晰中文 + 衬线字，hover 反转 */
+  .btn-elegant {
+    position: relative;
+    display: inline-flex;
+    width: 100%;
+    min-height: 52px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1px solid var(--ink);
+    background: transparent;
+    color: var(--ink);
+    font-family: "Newsreader", "Noto Serif SC", serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    cursor: pointer;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+  }
+  .btn-elegant::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--ink);
+    transform: translateY(101%);
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 0;
+  }
+  .btn-elegant > * {
+    position: relative;
+    z-index: 1;
+  }
+  .btn-elegant:hover {
+    color: var(--paper, #f7f5f0);
+  }
+  .btn-elegant:hover::before {
+    transform: translateY(0);
+  }
+  .btn-elegant:active {
+    transform: scale(0.99);
+  }
+  .btn-elegant:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 }

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 调色板底色（米色 paper）-->
+  <rect width="32" height="32" rx="6" fill="#F5F1EA"/>
+
+  <!-- 画框（深墨 ink 描边）-->
+  <rect x="5" y="5" width="22" height="22" rx="2" fill="none" stroke="#1A1A1A" stroke-width="2"/>
+
+  <!-- 画框内的"画面"：sage 绿山 + sun -->
+  <circle cx="20" cy="12" r="3" fill="#9CA884"/>
+  <path d="M5 22 L12 14 L17 19 L22 15 L27 22 Z" fill="#9CA884"/>
+
+  <!-- 调色板上的色点（warm 玫瑰红） -->
+  <circle cx="9" cy="9" r="1.5" fill="#C97D6A"/>
+
+  <!-- 画笔斜线 -->
+  <line x1="6" y1="27" x2="26" y2="6" stroke="#1A1A1A" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+</svg>

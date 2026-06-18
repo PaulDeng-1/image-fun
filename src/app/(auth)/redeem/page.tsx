@@ -40,9 +40,9 @@ function formatReason(reason: string): { label: string; positive: boolean } {
   }
 }
 
-// 千分位：999999 → 999,999
-function fmt(n: number): string {
-  return n.toLocaleString("zh-CN");
+// 金额（元）：保留 2 位小数
+function fmtYuan(n: number): string {
+  return `¥${n.toFixed(2)}`;
 }
 
 function formatTime(iso: string): string {
@@ -132,16 +132,11 @@ export default async function RedeemPage() {
               </p>
               <div className="mt-3 flex min-w-0 items-baseline gap-3">
                 <span className="truncate font-display text-5xl font-medium tabular leading-none md:text-6xl">
-                  {fmt(profile.credits)}
+                  ¥{profile.credits.toFixed(2)}
                 </span>
                 <span className="flex-shrink-0 font-mono text-sm tracking-wide text-paper/85">
-                  点
+                  元
                 </span>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-paper/85">
-                <span>1 点 = ¥0.7</span>
-                <span className="text-paper/40">·</span>
-                <span>约合 ¥{(profile.credits * 0.7).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               {(profile.total_recharged > 0 || profile.total_spent > 0) && (
                 <div className="mt-5 flex gap-6 border-t border-paper/15 pt-4 text-[12px] text-paper/85">
@@ -149,13 +144,13 @@ export default async function RedeemPage() {
                     <p className="font-mono text-[10px] tracking-wider text-paper/60">
                       总充值
                     </p>
-                    <p className="mt-0.5 tabular">{fmt(profile.total_recharged)} 点</p>
+                    <p className="mt-0.5 tabular">{fmtYuan(profile.total_recharged)}</p>
                   </div>
                   <div>
                     <p className="font-mono text-[10px] tracking-wider text-paper/60">
                       总消费
                     </p>
-                    <p className="mt-0.5 tabular">{fmt(profile.total_spent)} 点</p>
+                    <p className="mt-0.5 tabular">{fmtYuan(profile.total_spent)}</p>
                   </div>
                 </div>
               )}
@@ -243,8 +238,8 @@ export default async function RedeemPage() {
                           (positive ? "text-sage" : "text-rose")
                         }
                       >
-                        {positive ? "+" : ""}
-                        {fmt(Math.abs(row.delta))}
+                        {positive ? "+" : "-"}
+                        {fmtYuan(Math.abs(row.delta))}
                       </p>
                     </li>
                   );

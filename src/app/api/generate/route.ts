@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import sharp from "sharp";
-import { IMAGE_CONFIG, type ImageMode } from "@/lib/config";
+import { IMAGE_CONFIG, computeCost, type ImageMode, type ImageQuality } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
 
 // 单张图 30-90s，多图 / high 画质 / n>1 可能更久；放宽到 180s
@@ -171,7 +171,9 @@ export async function POST(req: NextRequest) {
   }
 
   const { mode, prompt, size, quality, n, images } = parsed;
-  const cost = n; // 1 张 = 1 点（1 点 = ¥0.7）
+  // M7：quality 分级定价（元/张），多张 = 单价 × n
+  // low=0.5, medium=0.7, high=0.9
+  const cost = computeCost(quality as ImageQuality, n);
   const upstreamUrl =
     mode === "i2i" ? IMAGE_CONFIG.editsEndpoint : IMAGE_CONFIG.endpoint;
 
@@ -652,6 +654,7 @@ export async function POST(req: NextRequest) {
 
     // 让 /me 的 Router Cache 失效 —— 用户生成完点"个人中心"能立刻看到新记录
     // 不清的话会看到上一次的 RSC payload，要手动刷新
+    // 注意：Next 14.2 的 revalidatePath 是同步调度缓存失效（不阻塞响应 body）
     revalidatePath("/me");
   } catch (persistErr) {
     console.error("[generate] persistence failed:", persistErr);

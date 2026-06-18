@@ -64,25 +64,23 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 4. 删 storage 文件（失败的继续往下走，文件最多变孤儿，不会阻塞行删）
-    if (paths.length > 0) {
-      const { error: rmErr } = await supabase.storage
-        .from("generations")
-        .remove(paths);
-      if (rmErr) {
-        console.error("[cleanup] storage remove partial fail:", rmErr);
-        errors.push(`storage: ${rmErr.message}`);
-      } else {
-        totalFilesRemoved += paths.length;
-      }
-    }
-
-    // 5. 硬删行
+    // 4. 删 storage 文件 + 5. 硬删行（并行）
     const ids = rows.map((r) => r.id);
-    const { error: delErr } = await supabase
-      .from("generations")
-      .delete()
-      .in("id", ids);
+    const [rmResult, delResult] = await Promise.all([
+      paths.length > 0
+        ? supabase.storage.from("generations").remove(paths)
+        : Promise.resolve({ error: null }),
+      supabase.from("generations").delete().in("id", ids),
+    ]);
+    const rmErr = rmResult.error;
+    const delErr = delResult.error;
+
+    if (rmErr) {
+      console.error("[cleanup] storage remove partial fail:", rmErr);
+      errors.push(`storage: ${rmErr.message}`);
+    } else {
+      totalFilesRemoved += paths.length;
+    }
     if (delErr) {
       console.error("[cleanup] delete rows failed:", delErr);
       errors.push(`delete: ${delErr.message}`);

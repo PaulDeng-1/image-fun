@@ -15,7 +15,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
   }
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  // 邮箱格式：要求 TLD 是 >=2 个字母（防 a@b.c111 这种伪邮箱）
+  // 用户部分允许字母数字._%+-，域名部分允许字母数字.-，点段 >= 1
+  if (
+    !email ||
+    !/^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test(email)
+  ) {
     return NextResponse.json({ error: "请输入有效的邮箱地址" }, { status: 400 });
   }
   if (!password || password.length < 6) {

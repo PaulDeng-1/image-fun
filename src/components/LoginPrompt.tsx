@@ -84,7 +84,7 @@ export function LoginPrompt({ open, onClose }: LoginPromptProps) {
         </div>
 
         <p className="text-[14px] leading-relaxed text-ink-soft">
-          登录后才能生成图片。生成一张消耗 1 点（¥0.7），登录后即可在
+          登录后才能生成图片。生成一张消耗 ¥0.5 起，按画质定价，登录后即可在
           {" "}
           <span className="font-medium text-ink">个人中心</span>
           {" "}

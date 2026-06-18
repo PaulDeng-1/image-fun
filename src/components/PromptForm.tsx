@@ -12,6 +12,7 @@ import { showToast } from "@/components/Toast";
 import { setBusy } from "@/components/BusyIndicator";
 import {
   IMAGE_CONFIG,
+  computeCost,
   type ImageMode,
   type ImageQuality,
   type ImageSize,
@@ -62,6 +63,12 @@ export function PromptForm({
   const isLoading = status.kind === "loading";
   const result = status.kind === "ok" ? status.result : null;
   const error = status.kind === "error" ? status : null;
+
+  const costLabel = (() => {
+    const cost = computeCost(quality, n);
+    const yuan = cost.toFixed(2);
+    return n === 1 ? `¥${yuan}/张` : `¥${yuan}（${quality}×${n}）`;
+  })();
 
   // 进入页面时探测登录态
   useEffect(() => {
@@ -282,7 +289,7 @@ export function PromptForm({
             </span>
             <div className="flex items-center gap-3">
               <span className="font-mono text-[12px] tabular text-ink-soft">
-                {n === 1 ? "¥0.7/张" : `¥0.7 × ${n}`}
+                {costLabel}
               </span>
               <button
                 type="submit"

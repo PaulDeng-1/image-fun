@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { IMAGE_CONFIG } from "@/lib/config";
 
@@ -15,14 +15,13 @@ export function ImageUploader({
   const [dragOver, setDragOver] = useState(false);
 
   // 预览用 objectURL，组件卸载或图片变更时 revoke
-  const [previews, setPreviews] = useState<string[]>([]);
+  const previews = useMemo(
+    () => images.map((f) => URL.createObjectURL(f)),
+    [images]
+  );
   useEffect(() => {
-    const urls = images.map((f) => URL.createObjectURL(f));
-    setPreviews(urls);
-    return () => {
-      urls.forEach((u) => URL.revokeObjectURL(u));
-    };
-  }, [images]);
+    return () => previews.forEach((u) => URL.revokeObjectURL(u));
+  }, [previews]);
 
   const add = (files: FileList | null) => {
     if (!files || files.length === 0) return;

@@ -1,5 +1,6 @@
 // 生成兑换码 CLI
 // 用法：npx tsx scripts/generate-codes.ts --amount 100 --count 10 [--note "闲鱼小包"] [--expires "2026-12-31"]
+// amount 单位是「元」（M7 改：之前是点，现在 amount 直接是元）
 // 必须用 service_role key（绕过 RLS 写 redemption_codes）
 // 读 .env.local 拿 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
 import { createClient } from "@supabase/supabase-js";
@@ -38,8 +39,8 @@ const note = getArg("--note") || null;
 const expiresRaw = getArg("--expires");
 const expiresAt = expiresRaw ? new Date(expiresRaw).toISOString() : null;
 
-if (!Number.isFinite(amount) || amount <= 0) {
-  console.error("[gen-codes] --amount 必须为正整数");
+if (!Number.isFinite(amount) || amount <= 0 || amount > 10000) {
+  console.error("[gen-codes] --amount 必须为 1-10000 之间的整数（元）");
   process.exit(1);
 }
 if (!Number.isFinite(count) || count <= 0 || count > 1000) {
@@ -101,7 +102,7 @@ if (error) {
 const inserted = data ?? [];
 
 // 输出
-console.log(`\n生成 ${inserted.length} 个兑换码（面值 ${amount} 点）：\n`);
+console.log(`\n生成 ${inserted.length} 个兑换码（面值 ¥${amount}）：\n`);
 console.log("=== 纯文本（可直接复制粘贴发给买家）===");
 for (const r of inserted) {
   console.log(r.code);
@@ -115,4 +116,4 @@ for (const r of inserted) {
   console.log(`${r.code},${r.amount},${exp},${nt}`);
 }
 
-console.log(`\n共 ${inserted.length} 个，金额 ${inserted.length * amount} 点`);
+console.log(`\n共 ${inserted.length} 个，金额 ¥${inserted.length * amount}`);

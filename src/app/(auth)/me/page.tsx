@@ -1,11 +1,12 @@
 // /me 个人中心
 // 显示当前用户信息 + 余额 + 充值入口 + 生成历史 + 登出
 // 余额走 profiles 表（实时）
+// profile + generations 用 Promise.all 并行查询（M2 优化）
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "@/components/LogoutButton";
-import { GenerationHistory } from "@/components/GenerationHistory";
+import { GenerationHistory, type GenerationItem } from "@/components/GenerationHistory";
 import { Toast } from "@/components/Toast";
 import { BusyIndicator } from "@/components/BusyIndicator";
 import { CopyBtn } from "@/components/CopyBtn";
@@ -30,17 +31,46 @@ export default async function MePage() {
   }
 
   const supabase = createClient();
+  // 并行查 profile + generations（M2 优化：避免串行 await）
+  const [profileResult, generationsResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("credits, total_recharged, total_spent")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("generations")
+      .select("id, prompt, image_urls, thumbnail_urls, created_at")
+      .eq("user_id", user.id)
+      // 只查已完成的（生成中 image_urls 为 null）
+      .not("image_urls", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(48),
+  ]);
+
+  if (generationsResult.error) {
+    console.error("[history] query failed:", generationsResult.error);
+  }
+
   // 拿 profile（M6）：trigger 会在 auth.users 新增时建好行；万一没建，maybeSingle 返 null，按 0 兜底
-  const { data: profileRow } = await supabase
-    .from("profiles")
-    .select("credits, total_recharged, total_spent")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  const profile: Profile = profileRow ?? {
+  const profile: Profile = profileResult.data ?? {
     credits: 0,
     total_recharged: 0,
     total_spent: 0,
   };
+
+  // 把 generations 压成 GenerationItem[]，移交给 GenerationHistory 渲染
+  // 防御：data 可能有 image_urls=null 但 not is null 没生效（旧数据残留）
+  const items: GenerationItem[] = ((generationsResult.data ?? []) as any[])
+    .filter((g) => Array.isArray(g.image_urls) && g.image_urls.length > 0)
+    .map((g) => ({
+      id: g.id,
+      prompt: g.prompt,
+      firstThumb: g.thumbnail_urls?.[0] || null,
+      firstUrl: g.image_urls?.[0] || null,
+      count: g.image_urls.length,
+      created_at: g.created_at,
+    }));
 
   const createdDate = new Date(user.created_at).toLocaleDateString("zh-CN");
 
@@ -104,10 +134,13 @@ export default async function MePage() {
           <div className="mt-4 flex items-baseline justify-between">
             <div>
               <p className="font-display text-3xl text-ink tabular">
-                {profile.credits.toLocaleString("zh-CN")}
+                {profile.credits.toLocaleString("zh-CN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
               <p className="mt-1 text-[12px] text-ink-soft">
-                点数（1 点 = ¥0.7）
+                余额（元）
               </p>
             </div>
             <Link
@@ -124,7 +157,11 @@ export default async function MePage() {
                   总充值
                 </dt>
                 <dd className="mt-0.5 font-mono text-[13px] tabular text-ink">
-                  {profile.total_recharged.toLocaleString("zh-CN")} 点
+                  {profile.total_recharged.toLocaleString("zh-CN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  元
                 </dd>
               </div>
               <div>
@@ -132,7 +169,11 @@ export default async function MePage() {
                   总消费
                 </dt>
                 <dd className="mt-0.5 font-mono text-[13px] tabular text-ink">
-                  {profile.total_spent.toLocaleString("zh-CN")} 点
+                  {profile.total_spent.toLocaleString("zh-CN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  元
                 </dd>
               </div>
             </dl>
@@ -140,7 +181,7 @@ export default async function MePage() {
         </div>
 
         <div className="rounded-2xl border border-line bg-paper-elev p-6 shadow-soft">
-          <GenerationHistory />
+          <GenerationHistory items={items} />
         </div>
 
         <LogoutButton />

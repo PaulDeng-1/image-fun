@@ -2,10 +2,11 @@
 // 用于 Server Component / Route Handler 中读当前 session
 // 每次调用都基于当前 Next.js cookies 创建一个新 client，避免跨请求泄漏 session
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-export function createClient() {
+export const createClient = cache(() => {
   const cookieStore = cookies();
 
   return createServerClient(
@@ -34,19 +35,16 @@ export function createClient() {
       },
     }
   );
-}
+});
 
 /**
  * 在 Server Component / Route Handler / Server Action 中取当前用户
  * 返回 null 表示未登录
  */
-export async function getCurrentUser() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export const getCurrentUser = cache(async () => {
+  const { data: { user } } = await (await createClient()).auth.getUser();
   return user;
-}
+});
 
 /**
  * Service-role 客户端：绕过 RLS，仅用于服务端受信任的运维任务

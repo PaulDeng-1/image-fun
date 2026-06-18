@@ -65,11 +65,18 @@ export default async function AdminCodesPage() {
 
   // 统计
   const total = rows.length;
-  const unused = rows.filter((r) => r.status === "unused").length;
-  const used = rows.filter((r) => r.status === "used").length;
-  const totalUnusedValue = rows
-    .filter((r) => r.status === "unused")
-    .reduce((s, r) => s + r.amount, 0);
+  const { unused, used, totalUnusedValue } = rows.reduce(
+    (acc, r) => {
+      if (r.status === "unused") {
+        acc.unused++;
+        acc.totalUnusedValue += Number(r.amount);
+      } else {
+        acc.used++;
+      }
+      return acc;
+    },
+    { unused: 0, used: 0, totalUnusedValue: 0 }
+  );
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -100,7 +107,7 @@ export default async function AdminCodesPage() {
           <Stat label="已使用" value={used.toLocaleString("zh-CN")} accent="ink" />
           <Stat
             label="未发放额度"
-            value={`${totalUnusedValue.toLocaleString("zh-CN")} 点`}
+            value={`¥${totalUnusedValue.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             accent="warm"
           />
         </div>
@@ -125,7 +132,7 @@ export default async function AdminCodesPage() {
               </p>
             ) : (
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[560px] text-left text-[13px]">
+                <table className="w-full min-w-[560px] text-left text-[13px] [content-visibility:auto]">
                   <thead>
                     <tr className="border-b border-line text-[11px] tracking-[0.14em] text-ink-mute">
                       <th className="py-2 pr-2 font-mono font-normal">码</th>
@@ -144,7 +151,7 @@ export default async function AdminCodesPage() {
                           </code>
                         </td>
                         <td className="py-2.5 pr-2 tabular">
-                          {r.amount}
+                          ¥{Number(r.amount).toFixed(2)}
                         </td>
                         <td className="py-2.5 pr-2">
                           <span

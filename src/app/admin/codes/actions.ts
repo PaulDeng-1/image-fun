@@ -61,8 +61,8 @@ export async function generateCodesAction(input: {
   }
 
   // 3. 输入校验
-  if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 100000) {
-    return { ok: false, error: "amount 必须为 1-100000 之间的整数" };
+  if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 10000) {
+    return { ok: false, error: "amount 必须为 1-10000 之间的整数（元）" };
   }
   if (!Number.isFinite(input.count) || input.count <= 0 || input.count > 500) {
     return { ok: false, error: "count 必须为 1-500 之间的整数" };

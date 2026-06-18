@@ -16,19 +16,21 @@ type RedeemResult = {
 };
 
 export async function POST(req: NextRequest) {
-  // 1. 登录检查
-  const user = await getCurrentUser();
+  // 1. 登录检查 + 2. 解析 body 并行
+  const [user, bodyResult] = await Promise.all([
+    getCurrentUser(),
+    req
+      .json()
+      .then((b) => ({ ok: true as const, body: b }))
+      .catch(() => ({ ok: false as const })),
+  ]);
   if (!user) {
     return NextResponse.json({ error: "请先登录" }, { status: 401 });
   }
-
-  // 2. 解析 body
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  if (!bodyResult.ok) {
     return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
   }
+  const body = bodyResult.body;
 
   // 收敛输入：必须是 string
   const raw = (body as Record<string, unknown>)?.code;
@@ -68,6 +70,7 @@ export async function POST(req: NextRequest) {
 
   if (row.status === "ok") {
     // 让 /me 余额立刻更新
+    // 注意：Next 14.2 的 revalidatePath 是同步调度缓存失效（不阻塞响应 body）
     revalidatePath("/me");
     revalidatePath("/redeem");
     return NextResponse.json(

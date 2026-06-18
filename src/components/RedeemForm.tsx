@@ -39,7 +39,7 @@ export function RedeemForm() {
       });
       const data = (await res.json().catch(() => ({}))) as RedeemResponse;
       if (res.ok && "ok" in data && data.ok) {
-        showToast(`兑换成功 +${data.amount} 点`, "success");
+        showToast(`兑换成功 +¥${Number(data.amount).toFixed(2)}`, "success");
         setCode("");
         // 重新拉服务端数据：余额 + ledger
         startTransition(() => router.refresh());
