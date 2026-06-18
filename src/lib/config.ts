@@ -54,11 +54,12 @@ export const IMAGE_CONFIG = {
   // 原图大小上限（防止有人上传 4K 巨型图卡住 sharp）
   maxSourceBytes: 25 * 1024 * 1024,
   // 单张扣费（单位：元）
-  // low=0.5 元/张，medium=0.7，high=0.9；多张 = 单价 × n
+  // M8：调到更激进的低价走量
+  // low=0.3, medium=0.5, high=0.7
   costPerImageByQuality: {
-    low: 0.5,
-    medium: 0.7,
-    high: 0.9,
+    low: 0.3,
+    medium: 0.5,
+    high: 0.7,
   },
 } as const;
 
