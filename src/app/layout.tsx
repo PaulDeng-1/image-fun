@@ -5,7 +5,7 @@ import { Navbar } from "@/components/Navbar";
 export const metadata: Metadata = {
   title: "生图 · 画境 — 把想象落地成图",
   description:
-    "写下提示词，立即生成图片。低/中/高 3 档画质，¥0.5 起每张。",
+    "写下提示词，立即生成图片。低/中/高 3 档画质，¥0.3 起每张。",
 };
 
 export default function RootLayout({
