@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
+import { NotificationMount } from "@/components/NotificationMount";
 
 export const metadata: Metadata = {
   title: "生图 · 画境 — 把想象落地成图",
@@ -29,6 +30,8 @@ export default function RootLayout({
         >
           {children}
         </main>
+        {/* 通知弹窗：仅登录用户挂载（登录/注册页也不会有 user） */}
+        <NotificationMount />
       </body>
     </html>
   );

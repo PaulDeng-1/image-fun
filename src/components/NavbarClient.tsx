@@ -5,6 +5,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserMenu } from "@/components/UserMenu";
+import { NotificationBell } from "@/components/NotificationBell";
 
 interface NavbarClientProps {
   email: string;
@@ -35,7 +36,10 @@ export function NavbarClient({ email, isAdmin }: NavbarClientProps) {
         </Link>
         <nav className="flex items-center gap-3 md:gap-5">
           {email ? (
-            <UserMenu email={email} isAdmin={isAdmin} />
+            <>
+              <NotificationBell />
+              <UserMenu email={email} isAdmin={isAdmin} />
+            </>
           ) : (
             <>
               <Link

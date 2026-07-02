@@ -66,16 +66,28 @@ export function UserMenu({ email, isAdmin = false }: UserMenuProps) {
             个人中心
           </Link>
           {isAdmin && (
-            <Link
-              href="/admin/codes"
-              onClick={() => setOpen(false)}
-              className="flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink hover:bg-line-soft"
-            >
-              <span>兑换码管理</span>
-              <span className="rounded-full border border-warm/40 bg-warm/10 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.1em] text-warm">
-                admin
-              </span>
-            </Link>
+            <>
+              <Link
+                href="/admin/codes"
+                onClick={() => setOpen(false)}
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink hover:bg-line-soft"
+              >
+                <span>兑换码管理</span>
+                <span className="rounded-full border border-warm/40 bg-warm/10 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.1em] text-warm">
+                  admin
+                </span>
+              </Link>
+              <Link
+                href="/admin/notifications"
+                onClick={() => setOpen(false)}
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink hover:bg-line-soft"
+              >
+                <span>通知发布</span>
+                <span className="rounded-full border border-warm/40 bg-warm/10 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.1em] text-warm">
+                  admin
+                </span>
+              </Link>
+            </>
           )}
           <div className="my-1 h-px bg-line-soft" />
           <button
