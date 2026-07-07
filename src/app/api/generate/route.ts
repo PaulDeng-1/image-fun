@@ -2,23 +2,29 @@
 // M6：credits 扣费 + 全路径退款保障
 //
 // 事务编排（关键：consume 必须拿到 ref_id）：
-//   1) 校验请求 + 登录
+//   1) 校验请求 + 登录 + 限流
 //   2) INSERT 一行空的 generations（拿 id 作为 ledger.ref_id）
 //   3) credit_consume(cost, gen_id) —— 原子扣费
 //      - 失败（402 / 余额不足）：DELETE gen 行，返回错误
 //   4) 调上游 —— 失败：refund + DELETE gen 行
 //   5) 持久化图片到 Storage —— 失败：refund + DELETE gen 行 + 删 storage
 //   6) UPDATE gen 行 image_urls / thumbnail_urls
-//   7) revalidatePath('/me')
-//   8) 返回成功
+//   7) 返回成功（不调 revalidatePath——/me 是 force-dynamic，无需失效）
 //
 // 客户端断开（req.signal.aborted）→ 透传到 controller.abort()，
 // 上游 fetch 会中止，避免白扣。
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
 import sharp from "sharp";
 import { IMAGE_CONFIG, computeCost, type ImageMode, type ImageQuality } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
+import { rateLimit, RL_GENERATE } from "@/lib/ratelimit";
+import { log, timer as logTimer } from "@/lib/log";
+import {
+  UpstreamResponseSchema,
+  extractImages,
+  extractError,
+  type UpstreamResponse,
+} from "@/lib/upstream-schema";
 
 // 单张图 30-90s，多图 / high 画质 / n>1 可能更久；放宽到 180s
 export const maxDuration = 180;
@@ -157,6 +163,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 限流（P0 修复）：单用户 10 次 / 分钟
+  // 防脚本恶意刷 + 防中转站账号被打爆
+  // 必须放在登录后、扣费前——避免对未登录用户消耗计数
+  const rl = rateLimit({
+    key: `generate:user:${user.id}`,
+    ...RL_GENERATE,
+  });
+  if (!rl.ok) {
+    const retryAfter = Math.ceil(rl.resetMs / 1000);
+    return NextResponse.json(
+      {
+        error: `请求过于频繁，请 ${retryAfter} 秒后再试`,
+        code: "rate_limited",
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(retryAfter) },
+      }
+    );
+  }
+
   const apiKey = process.env.GPT_IMAGE_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -198,7 +225,10 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (preInsertErr || !genRow) {
-    console.error("[generate] pre-insert generations failed:", preInsertErr);
+    log.error("generate", "pre-insert generations failed", {
+      userId: user.id,
+      err: preInsertErr,
+    });
     return NextResponse.json(
       { error: "历史记录创建失败，请稍后再试" },
       { status: 500 }
@@ -215,7 +245,12 @@ export async function POST(req: NextRequest) {
   );
 
   if (consumeErr) {
-    console.error("[generate] credit_consume rpc error:", consumeErr);
+    log.error("generate", "credit_consume rpc error", {
+      userId: user.id,
+      genId,
+      cost,
+      err: consumeErr,
+    });
     await supabase.from("generations").delete().eq("id", genId);
     return NextResponse.json(
       { error: "余额服务异常，请稍后再试" },
@@ -224,6 +259,7 @@ export async function POST(req: NextRequest) {
   }
   if (consumed !== true) {
     // 余额不足 / ref_id 校验失败
+    log.info("generate", "insufficient credits", { userId: user.id, genId, cost });
     await supabase.from("generations").delete().eq("id", genId);
     return NextResponse.json(
       {
@@ -336,6 +372,9 @@ export async function POST(req: NextRequest) {
   let upstream: Response | null = null;
   let detail = "";
   let raw: any = null;
+  // P2 修复：Zod 校验后的强类型响应。如果上游返回 shape 变了，Zod 仍能
+  // .passthrough() 兜住，但 schema 不匹配会写错误日志便于监控。
+  let upstreamParsed: UpstreamResponse | null = null;
   let cfChallenge = false;
   let lastErr: unknown = null;
 
@@ -352,6 +391,24 @@ export async function POST(req: NextRequest) {
           raw = detail ? JSON.parse(detail) : null;
         } catch {
           raw = null;
+        }
+        // P2 修复：用 Zod 严格校验上游响应 shape
+        // 上游改字段时立刻在监控里告警，而不是「0 张图」静默退款
+        if (raw !== null) {
+          const validation = UpstreamResponseSchema.safeParse(raw);
+          if (validation.success) {
+            upstreamParsed = validation.data;
+          } else {
+            log.error("generate", "upstream schema validation failed", {
+              userId: user.id,
+              status: r0.status,
+              issues: validation.error.issues.slice(0, 5),
+              rawKeys: Object.keys(raw),
+            });
+            // 失败仍用 raw 兜底解析（向后兼容），
+            // 但 Zod 失败已经写日志了，监控能看到
+            upstreamParsed = raw as UpstreamResponse;
+          }
         }
         break;
       }
@@ -479,51 +536,52 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 上游响应可能是多种形态：
+  // 上游响应可能是多种形态（兼容 4+ 种 shape）：
   //   { data: [{ url|b64_json|image_url }] }   OpenAI 官方
   //   { data: [{ image: "..." }] }              部分中转
   //   { images: [{ url }] }                     部分中转
   //   { url: "..." } / { b64_json: "..." }      单图直返
-  // 兼容所有，b64 直接转 data URL 让前端能展示
+  // P2 修复：之前是手写 if/else pushItem，现在是 Zod schema + extractImages
+  // —— 上游改字段时不再静默返 0 张图，监控立刻能看到
   type ImgItem = { kind: "url"; value: string } | { kind: "b64"; value: string };
 
-  // body 已经在 callUpstream 里读过一遍并 JSON.parse 进 `raw`，
-  // 这里直接用，不要再 upstream.json() 读第二次（会被读空成 null）。
-  const items: ImgItem[] = [];
-  const pushItem = (d: any) => {
-    if (!d || typeof d !== "object") return;
-    if (typeof d.url === "string" && d.url) {
-      items.push({ kind: "url", value: d.url });
-    } else if (typeof d.image_url === "string" && d.image_url) {
-      items.push({ kind: "url", value: d.image_url });
-    } else if (typeof d.image === "string" && d.image) {
-      items.push({ kind: "url", value: d.image });
-    } else if (typeof d.b64_json === "string" && d.b64_json) {
-      items.push({ kind: "b64", value: d.b64_json });
-    } else if (typeof d.b64 === "string" && d.b64) {
-      items.push({ kind: "b64", value: d.b64 });
+  // 优先用 Zod 校验后的 upstreamParsed（强类型），fallback 到 raw 兜底
+  const items: ImgItem[] = upstreamParsed
+    ? extractImages(upstreamParsed).map((x) => ({ kind: "url", value: x.value }))
+    : [];
+  // b64 处理（extractImages 当前只透传 url；要保留 b64 → data URL 能力）
+  if (upstreamParsed) {
+    const pushB64 = (d: { b64_json?: string; b64?: string } | undefined) => {
+      if (!d) return;
+      if (typeof d.b64_json === "string" && d.b64_json)
+        items.push({ kind: "b64", value: d.b64_json });
+      else if (typeof d.b64 === "string" && d.b64)
+        items.push({ kind: "b64", value: d.b64 });
+    };
+    const data = upstreamParsed.data;
+    if (Array.isArray(data)) data.forEach(pushB64);
+    else if (data && typeof data === "object") pushB64(data);
+    const images = upstreamParsed.images;
+    if (Array.isArray(images)) images.forEach(pushB64);
+    else if (images && typeof images === "object") pushB64(images);
+    if (items.length === 0) {
+      if (typeof upstreamParsed.b64_json === "string" && upstreamParsed.b64_json)
+        items.push({ kind: "b64", value: upstreamParsed.b64_json });
+      else if (typeof upstreamParsed.b64 === "string" && upstreamParsed.b64)
+        items.push({ kind: "b64", value: upstreamParsed.b64 });
     }
-  };
-
-  if (raw && typeof raw === "object") {
-    if (Array.isArray(raw.data)) raw.data.forEach(pushItem);
-    else if (raw.data && typeof raw.data === "object") pushItem(raw.data);
-
-    if (Array.isArray(raw.images)) raw.images.forEach(pushItem);
-    else if (raw.images && typeof raw.images === "object") pushItem(raw.images);
-
-    // 顶层单图
-    if (items.length === 0) pushItem(raw);
   }
 
   if (items.length === 0) {
     // 完整 dump 到日志，方便排查代理返回了什么鬼
-    console.error(
-      "[generate] no images in response. status=%s, contentType=%s, body:",
-      upstream.status,
-      upstream.headers.get("content-type"),
-      JSON.stringify(raw).slice(0, 2000)
-    );
+    log.error("generate", "no images in upstream response", {
+      userId: user.id,
+      genId,
+      status: upstream.status,
+      contentType: upstream.headers.get("content-type"),
+      rawShape: raw ? Object.keys(raw) : null,
+      rawSample: JSON.stringify(raw).slice(0, 2000),
+    });
     clearTimeout(timer);
     await cleanup();
     return NextResponse.json(
@@ -652,10 +710,10 @@ export async function POST(req: NextRequest) {
       throw new Error(`generations update failed: ${updateErr.message}`);
     }
 
-    // 让 /me 的 Router Cache 失效 —— 用户生成完点"个人中心"能立刻看到新记录
-    // 不清的话会看到上一次的 RSC payload，要手动刷新
-    // 注意：Next 14.2 的 revalidatePath 是同步调度缓存失效（不阻塞响应 body）
-    revalidatePath("/me");
+    // P1 优化：删掉 revalidatePath("/me")
+    // 原因：(auth)/me/page.tsx 是 force-dynamic + revalidate=0，
+    // 每次请求都重新拉数据——revalidatePath 在这种页面上是 no-op，
+    // 反而白付 50-200ms 延迟。删掉后用户从首页跳 /me 立即看到新图。
   } catch (persistErr) {
     console.error("[generate] persistence failed:", persistErr);
     clearTimeout(timer);

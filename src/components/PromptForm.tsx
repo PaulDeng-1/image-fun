@@ -369,7 +369,7 @@ export function PromptForm({
       )}
 
       <div ref={resultRef} className="mt-12 scroll-mt-24">
-        {status.kind === "loading" && <LoadingState count={n} />}
+        {status.kind === "loading" && <LoadingState count={n} quality={quality} />}
         {result && (
           <ResultCard
             result={result}
@@ -386,15 +386,42 @@ export function PromptForm({
   );
 }
 
-function LoadingState({ count }: { count: number }) {
-  // 根据数量给一个粗略的预估秒数
-  const estimate =
-    count <= 1 ? "30-60" : count <= 4 ? "60-120" : "120-180";
+function LoadingState({ count, quality }: { count: number; quality: string }) {
+  // P2 优化：F1 进度条
+  // 真实进度无法从上游拿（OpenAI 生图 API 不流式输出），
+  // 用「时间估算 + 90% 封顶」方案——90% 后卡住，避免误以为马上完成。
+  // 启动时间由父组件注入，保证「点提交 → 立刻开始计时」。
+
+  // 总预估时间（秒）：中点估值
+  // - n=1 low/medium → 45s；n=1 high → 75s
+  // - n=2-4 low/medium → 90s；n=2-4 high → 150s
+  // - n>4 → 180s
+  const total =
+    count <= 1
+      ? quality === "high" ? 75 : 45
+      : count <= 4
+        ? quality === "high" ? 150 : 90
+        : 180;
+
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    const t0 = Date.now();
+    setElapsedSec(0);
+    const id = window.setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - t0) / 1000));
+    }, 500);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // 90% 封顶：超过预估时间后条不走了，避免误导
+  const pct = Math.min(90, (elapsedSec / total) * 100);
+  const remaining = Math.max(0, total - elapsedSec);
+
   return (
     <div className="animate-fadeUp overflow-hidden rounded-2xl border border-line bg-paper-elev shadow-soft">
       <div className="grid-bg relative aspect-square w-full">
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="flex flex-col items-center gap-5 text-center">
+          <div className="flex w-full max-w-xs flex-col items-center gap-6 px-6 text-center">
             <div className="flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-soft [animation-delay:-0.3s]" />
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-soft [animation-delay:-0.15s]" />
@@ -406,15 +433,29 @@ function LoadingState({ count }: { count: number }) {
                 <span className="ml-1 text-ink-soft">× {count}</span>
               )}
             </h3>
-            <p className="text-sm leading-relaxed text-ink-soft">
-              请耐心等待
-              <span className="mx-1.5 text-line">·</span>
-              通常需要
-              <span className="mx-1 font-serif-italic text-ink">
-                {estimate}
-              </span>
-              秒
-            </p>
+            {/* 进度条 */}
+            <div className="w-full">
+              <div
+                className="h-1 w-full overflow-hidden rounded-full bg-line-soft"
+                role="progressbar"
+                aria-valuenow={Math.round(pct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className="h-full bg-ink transition-all duration-500 ease-out"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between font-mono text-[11px] tabular text-ink-mute">
+                <span>已用 {elapsedSec}s</span>
+                <span>
+                  {pct >= 90
+                    ? "即将完成…"
+                    : `预计剩余 ${remaining}s`}
+                </span>
+              </div>
+            </div>
             <p className="pb-1 font-serif-italic text-xs leading-[1.3] text-ink-mute">
               a moment of patience
             </p>

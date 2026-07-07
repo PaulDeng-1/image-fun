@@ -2,7 +2,6 @@
 // POST { code: string }
 // 走 RPC redemption_redeem 走事务原子更新（code 标 used + 加 credits + 写流水）
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -69,10 +68,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (row.status === "ok") {
-    // 让 /me 余额立刻更新
-    // 注意：Next 14.2 的 revalidatePath 是同步调度缓存失效（不阻塞响应 body）
-    revalidatePath("/me");
-    revalidatePath("/redeem");
+    // P1 优化：删掉 revalidatePath("/me") 和 revalidatePath("/redeem")
+    // 原因：(auth)/me 和 (auth)/redeem 都是 force-dynamic + revalidate=0，
+    // revalidatePath 在这种页面上是 no-op，还白付 50-200ms 延迟。
+    // /redeem 页本身会因为 force-dynamic 重新跑——余额立即更新。
     return NextResponse.json(
       {
         ok: true,

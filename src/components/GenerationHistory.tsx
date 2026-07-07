@@ -12,6 +12,7 @@ export type GenerationItem = {
   firstThumb: string | null;
   count: number;
   created_at: string;
+  favorited?: boolean;
 };
 
 export function GenerationHistory({ items }: { items: GenerationItem[] }) {
@@ -79,7 +80,11 @@ export function GenerationHistory({ items }: { items: GenerationItem[] }) {
                   </a>
                 )}
                 {first && item.firstUrl && (
-                  <GenerationActions id={item.id} downloadUrl={item.firstUrl} />
+                  <GenerationActions
+                    id={item.id}
+                    downloadUrl={item.firstUrl}
+                    initialFavorited={item.favorited ?? false}
+                  />
                 )}
                 {more > 0 && (
                   <span className="absolute bottom-1.5 right-1.5 z-10 rounded-md bg-ink/70 px-1.5 py-0.5 font-mono text-[10px] tabular text-paper backdrop-blur-sm">

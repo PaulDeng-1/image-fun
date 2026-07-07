@@ -31,8 +31,8 @@ export default async function MePage() {
   }
 
   const supabase = createClient();
-  // 并行查 profile + generations（M2 优化：避免串行 await）
-  const [profileResult, generationsResult] = await Promise.all([
+  // 并行查 profile + generations + favorites set（M2 + F3：避免串行 await）
+  const [profileResult, generationsResult, favoritesResult] = await Promise.all([
     supabase
       .from("profiles")
       .select("credits, total_recharged, total_spent")
@@ -40,17 +40,37 @@ export default async function MePage() {
       .maybeSingle(),
     supabase
       .from("generations")
-      .select("id, prompt, image_urls, thumbnail_urls, created_at")
+      // P1 优化：原 select 把整张 image_urls 数组拖到 RSC payload
+      // （48 条 × 1-4 张图 URL × ~200B ≈ 40-80KB 不必要数据）
+      // 改用 PostgREST 数组下标 + array_length + AS 起别名：
+      //   image_urls[1] AS first_url      → 第一张图的 URL（首图预览用）
+      //   array_length(image_urls, 1) AS img_count → 总张数（"n 张"用）
+      //   thumbnail_urls[1] AS first_thumb → 缩略图首张
+      // PostgREST 数组下标 1-based；空数组 / NULL 返回 NULL，安全。
+      .select(
+        "id, prompt, mode, size, quality, n, image_urls[1] AS first_url, array_length(image_urls, 1) AS img_count, thumbnail_urls[1] AS first_thumb, created_at"
+      )
       .eq("user_id", user.id)
       // 只查已完成的（生成中 image_urls 为 null）
       .not("image_urls", "is", null)
       .order("created_at", { ascending: false })
       .limit(48),
+    // F3：拿到当前用户的收藏 gen_id 集合
+    // 注意：favorites 表只存 (user_id, gen_id)，不需要原图数据
+    supabase
+      .from("favorites")
+      .select("gen_id")
+      .eq("user_id", user.id),
   ]);
 
   if (generationsResult.error) {
     console.error("[history] query failed:", generationsResult.error);
   }
+
+  // 收藏集合（Set O(1) 查询）
+  const favoritedIds = new Set(
+    ((favoritesResult.data ?? []) as { gen_id: string }[]).map((f) => f.gen_id)
+  );
 
   // 拿 profile（M6）：trigger 会在 auth.users 新增时建好行；万一没建，maybeSingle 返 null，按 0 兜底
   const profile: Profile = profileResult.data ?? {
@@ -60,16 +80,19 @@ export default async function MePage() {
   };
 
   // 把 generations 压成 GenerationItem[]，移交给 GenerationHistory 渲染
-  // 防御：data 可能有 image_urls=null 但 not is null 没生效（旧数据残留）
+  // P1 优化：select 已用 first_url / img_count / first_thumb 别名直接返回首图
+  // —— 不再需要 .filter 检查数组长度，NULL 自然就被过滤掉
+  // F3：加上 favorited 字段，GenerationActions 用它决定星标状态
   const items: GenerationItem[] = ((generationsResult.data ?? []) as any[])
-    .filter((g) => Array.isArray(g.image_urls) && g.image_urls.length > 0)
+    .filter((g) => g.first_url) // NULL（生成中/无图）直接过滤
     .map((g) => ({
       id: g.id,
       prompt: g.prompt,
-      firstThumb: g.thumbnail_urls?.[0] || null,
-      firstUrl: g.image_urls?.[0] || null,
-      count: g.image_urls.length,
+      firstThumb: g.first_thumb || null,
+      firstUrl: g.first_url || null,
+      count: g.img_count ?? 1,
       created_at: g.created_at,
+      favorited: favoritedIds.has(g.id),
     }));
 
   const createdDate = new Date(user.created_at).toLocaleDateString("zh-CN");
@@ -143,12 +166,20 @@ export default async function MePage() {
                 余额（元）
               </p>
             </div>
-            <Link
-              href="/redeem"
-              className="rounded-xl border border-line bg-paper-warm px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-line-soft"
-            >
-              充值
-            </Link>
+            <div className="flex flex-col gap-2">
+              <Link
+                href="/redeem"
+                className="rounded-xl border border-line bg-paper-warm px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-line-soft"
+              >
+                充值
+              </Link>
+              <Link
+                href="/favorites"
+                className="rounded-xl border border-line bg-paper px-5 py-2 text-center text-sm font-medium text-ink-soft transition-colors hover:bg-line-soft hover:text-ink"
+              >
+                我的收藏
+              </Link>
+            </div>
           </div>
           {(profile.total_recharged > 0 || profile.total_spent > 0) && (
             <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-line-soft pt-3">

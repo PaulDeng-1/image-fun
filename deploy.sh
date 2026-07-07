@@ -169,6 +169,39 @@ nginx -t
 systemctl enable --now nginx
 systemctl reload nginx
 
+# 9. 注册 cleanup cron（P1 修复）
+# 背景：/api/cron/cleanup-generations 本来给 Vercel Cron 用，
+# 但部署在腾讯云轻量云上 Vercel Cron 不会触发 → deleted_at 30 天前的行
+# 永远不删 → Storage 持续涨。
+# 修法：用系统 crontab 每天 3:30 AM 调一次本机端点。
+# 选 3:30（不是整点）避开各种整点跑批的高峰。
+banner "[9/9] 注册 cleanup cron"
+if [ -z "${CRON_SECRET:-}" ]; then
+  # 没传 CRON_SECRET 就从 .env.local 拿（部署时常会从环境传进来）
+  if [ -f /opt/image-fun/.env.local ]; then
+    CRON_SECRET=$(grep -E '^CRON_SECRET=' /opt/image-fun/.env.local | head -1 | cut -d= -f2- | tr -d '"' "'" )
+  fi
+fi
+if [ -z "$CRON_SECRET" ] || [ "$CRON_SECRET" = "replace-me-with-random-32-byte-hex" ]; then
+  echo "⚠️  CRON_SECRET 未配置或还是占位值，跳过 cron 注册"
+  echo "    手动设置后跑：bash deploy.sh 重试，或手动 crontab -e 加："
+  echo "    30 3 * * * curl -fsS -H 'Authorization: Bearer \$CRON_SECRET' http://127.0.0.1:3000/api/cron/cleanup-generations"
+else
+  CRON_LINE="30 3 * * * curl -fsS -H 'Authorization: Bearer ${CRON_SECRET}' http://127.0.0.1:3000/api/cron/cleanup-generations >> /var/log/image-fun-cleanup.log 2>&1"
+  # 幂等：检查是否已存在
+  EXISTING=$(crontab -l 2>/dev/null | grep -F "/api/cron/cleanup-generations" || true)
+  if [ -n "$EXISTING" ]; then
+    echo "✓ cleanup cron 已存在，跳过注册"
+    echo "  当前条目：$EXISTING"
+  else
+    # 保留现有 crontab，追加新行
+    ( crontab -l 2>/dev/null || true; echo "$CRON_LINE" ) | crontab -
+    echo "✓ cleanup cron 已注册（每天 3:30 AM）"
+    echo "  条目：$CRON_LINE"
+  fi
+  echo "  日志：tail -f /var/log/image-fun-cleanup.log"
+fi
+
 # 完成
 banner "✅ 部署完成"
 echo ""

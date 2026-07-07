@@ -43,12 +43,14 @@ export const IMAGE_CONFIG = {
   // 允许的图片 MIME
   allowedImageMimes: ["image/png", "image/jpeg", "image/webp"] as const,
   // /me 列表用的缩略图（M5.x）：原图 1024×1024 PNG 拉 48 张 = 100+ MB，
-  // 缩略图 256×256 WebP ~10-30KB，列表渲染快 100 倍。
+  // 缩略图小一些列表加载快 100 倍。
+  // P1 优化：256×256 q80 → 192×192 q65。移动端 192px 完全够用，
+  // q65 视觉差异极小，单张从 ~20KB → ~8KB，48 张从 ~1MB → ~400KB。
   // 短边 cover：人像/横图都不会变形。
   thumbnail: {
-    width: 256,
-    height: 256,
-    quality: 80,
+    width: 192,
+    height: 192,
+    quality: 65,
     format: "webp" as const,
   },
   // 原图大小上限（防止有人上传 4K 巨型图卡住 sharp）

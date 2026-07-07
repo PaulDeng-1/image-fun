@@ -19,7 +19,9 @@ type Notification = {
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
-    return NextResponse.json({ items: [] }, { status: 200 });
+    // P0 修复：未登录必须显式 401，不要静默返空
+    // ——避免未来 RLS 改动泄露，同时让前端行为可预测
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
   }
 
   const supabase = createClient();
@@ -30,7 +32,6 @@ export async function GET() {
       .from("notifications")
       .select("id, title, body, type, published_at, expires_at")
       .lte("published_at", new Date().toISOString())
-      // 过期过滤：要么 expires_at 为 null，要么 > now
       .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
       .order("published_at", { ascending: false })
       .limit(20),
@@ -46,7 +47,6 @@ export async function GET() {
   }
   if (readsRes.error) {
     console.error("[notifications/unread] reads query failed:", readsRes.error);
-    // 已读查失败时降级为全部显示，让用户至少能看一遍
     return NextResponse.json(
       { items: (notifRes.data ?? []) as Notification[] },
       { status: 200 }

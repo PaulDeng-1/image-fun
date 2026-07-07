@@ -1,0 +1,19 @@
+-- 2026-07-07: 图片变体半价定价
+--
+-- 概念：用户对自己已生成的图不满意，可以用「变体」功能基于原图再生成一次。
+-- 变体只调上游 /v1/images/variations，比 t2i 便宜 → 收半价。
+--
+-- 旧的 costPerImageByQuality 是生成原图的价格；变体不直接用这个表。
+-- 在 credit_consume 调用时直接传 half price 即可，RPC 本身不变。
+--
+-- 唯一 DB 变更：profiles 加一个 ledger 维度做 ROI 分析（可选但便宜）。
+-- 做法：用 credit_ledger.reason 区分 'generate' 和 'variation'。
+-- 不需要 schema 变化——reason 已经是 text。
+-- 但需要 backfill：把现有 reason='generate' 不动，新写的 variation 走 'variation'。
+--
+-- 本文件其实**没有 schema 变化**，只是文档说明。
+-- 保留这个空文件为了：
+--   1) 跟其他迁移同目录，方便 review
+--   2) 明确「我们没有在迁移里加新表/新列」
+--   3) 如果未来要给变体做单独的统计表，再写真正的 DDL
+select 1; -- 显式空语句，让 psql 跑过去不报 "no SQL"
