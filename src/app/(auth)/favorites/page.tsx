@@ -19,8 +19,8 @@ type GenRow = {
   size: string;
   quality: string;
   n: number;
-  first_url: string | null;
-  first_thumb: string | null;
+  image_urls: string[] | null;
+  thumbnail_urls: string[] | null;
   created_at: string;
   deleted_at: string | null;
 };
@@ -44,10 +44,8 @@ export default async function FavoritesPage() {
       created_at,
       generation:generations!inner (
         id, prompt, mode, size, quality, n,
-        image_urls[1] AS first_url,
-        thumbnail_urls[1] AS first_thumb,
-        created_at,
-        deleted_at
+        image_urls, thumbnail_urls,
+        created_at, deleted_at
       )
     `
     )
@@ -107,7 +105,7 @@ export default async function FavoritesPage() {
             {items.map(({ gen, created_at: favAt }) => {
               if (!gen) return null;
               const isDeleted = !!gen.deleted_at;
-              const src = gen.first_thumb || gen.first_url;
+              const src = gen.thumbnail_urls?.[0] || gen.image_urls?.[0] || null;
               return (
                 <li
                   key={gen.id}
@@ -116,7 +114,7 @@ export default async function FavoritesPage() {
                   <div className="relative aspect-square w-full">
                     {src && !isDeleted ? (
                       <a
-                        href={gen.first_url ?? "#"}
+                        href={gen.image_urls?.[0] ?? "#"}
                         target="_blank"
                         rel="noreferrer"
                         className="block"

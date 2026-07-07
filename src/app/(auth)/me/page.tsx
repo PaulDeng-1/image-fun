@@ -40,16 +40,11 @@ export default async function MePage() {
       .maybeSingle(),
     supabase
       .from("generations")
-      // P1 优化：原 select 把整张 image_urls 数组拖到 RSC payload
-      // （48 条 × 1-4 张图 URL × ~200B ≈ 40-80KB 不必要数据）
-      // 改用 PostgREST 数组下标 + array_length + AS 起别名：
-      //   image_urls[1] AS first_url      → 第一张图的 URL（首图预览用）
-      //   array_length(image_urls, 1) AS img_count → 总张数（"n 张"用）
-      //   thumbnail_urls[1] AS first_thumb → 缩略图首张
-      // PostgREST 数组下标 1-based；空数组 / NULL 返回 NULL，安全。
-      .select(
-        "id, prompt, mode, size, quality, n, image_urls[1] AS first_url, array_length(image_urls, 1) AS img_count, thumbnail_urls[1] AS first_thumb, created_at"
-      )
+      // select 整列，应用层取首图 + 总数
+      // 之前想用 image_urls[1] AS first_url 减小 RSC payload，
+      // 但 Supabase 老版本 PostgREST 不支持 select 里的数组下标（PGRST100），
+      // 回退到全量 select + JS 切片。损失 30-50KB payload 但保证能用。
+      .select("id, prompt, mode, size, quality, n, image_urls, thumbnail_urls, created_at")
       .eq("user_id", user.id)
       // 只查已完成的（生成中 image_urls 为 null）
       .not("image_urls", "is", null)
@@ -80,17 +75,16 @@ export default async function MePage() {
   };
 
   // 把 generations 压成 GenerationItem[]，移交给 GenerationHistory 渲染
-  // P1 优化：select 已用 first_url / img_count / first_thumb 别名直接返回首图
-  // —— 不再需要 .filter 检查数组长度，NULL 自然就被过滤掉
+  // 防御：data 可能有 image_urls=null 但 not is null 没生效（旧数据残留）
   // F3：加上 favorited 字段，GenerationActions 用它决定星标状态
   const items: GenerationItem[] = ((generationsResult.data ?? []) as any[])
-    .filter((g) => g.first_url) // NULL（生成中/无图）直接过滤
+    .filter((g) => Array.isArray(g.image_urls) && g.image_urls.length > 0)
     .map((g) => ({
       id: g.id,
       prompt: g.prompt,
-      firstThumb: g.first_thumb || null,
-      firstUrl: g.first_url || null,
-      count: g.img_count ?? 1,
+      firstThumb: g.thumbnail_urls?.[0] || null,
+      firstUrl: g.image_urls?.[0] || null,
+      count: g.image_urls.length,
       created_at: g.created_at,
       favorited: favoritedIds.has(g.id),
     }));

@@ -13,6 +13,12 @@
 -- 注意：credit_refund 仍然按 generate 退款——变体失败也按原变体价格退
 -- （不能退到原 generate 上，否则账目错乱）
 
+-- 重要：必须先 drop 旧函数
+-- 原因：CREATE OR REPLACE 在参数数量变化时（2 个 → 3 个）不会替换，
+-- 会创建一个新函数，导致重载冲突（PGRST203：无法在两个版本间选择）。
+-- 留 default 值也无法消除歧义。
+drop function if exists public.credit_consume(p_amount numeric, p_ref_id uuid);
+
 create or replace function public.credit_consume(
   p_amount numeric,
   p_ref_id uuid,
